@@ -5,14 +5,16 @@
   <meta name="viewport"
         content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Sky Hero Dash</title>
-  <link rel="stylesheet" href="style.css" />
+
+  <!-- Cache-busted CSS -->
+  <link rel="stylesheet" href="style.css?v=5" />
 </head>
 <body>
   <div id="app">
     <h1 id="title">Sky Hero Dash</h1>
 
     <div id="topbar">
-      <div class="pill" id="playerPill">Player: <span id="playerName">—</span></div>
+      <div class="pill">Player: <span id="playerName">—</span></div>
       <div class="pill">Score: <span id="scoreText">0</span></div>
       <div class="pill">Best: <span id="bestText">0</span></div>
       <button id="resetButton" class="btn">Reset</button>
@@ -32,10 +34,11 @@
     <div id="leaderboardWrap">
       <h2>Top 5</h2>
       <ol id="leaderboard"></ol>
-      <div class="tinyNote">Leaderboard is saved on each device (localStorage).</div>
+      <div class="tinyNote">Leaderboard is saved on each device.</div>
     </div>
   </div>
 
-  <script src="game.js"></script>
+  <!-- Cache-busted JS -->
+  <script src="game.js?v=5"></script>
 </body>
 </html>
