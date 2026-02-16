@@ -3,10 +3,21 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#0b1220" />
   <title>Sky Hero Dash</title>
-  <link rel="stylesheet" href="style.css?v=12" />
+  <link rel="stylesheet" href="style.css?v=13" />
 </head>
 <body>
+  <!-- Splash -->
+  <div id="splash" class="splash">
+    <div class="splashCard">
+      <div class="splashTitle">Sky Hero Dash</div>
+      <div class="splashSub">Loading…</div>
+      <div class="splashBar"><div id="splashFill" class="splashFill"></div></div>
+      <div class="splashHint">Tip: Tap once to enable audio on mobile.</div>
+    </div>
+  </div>
+
   <div id="app">
     <div id="topbar">
       <div class="pill">Player: <span id="playerName">—</span></div>
@@ -28,7 +39,7 @@
           <button id="overlayHome" class="btn big secondary">Home</button>
           <button id="overlaySettings" class="btn big secondary">Settings</button>
         </div>
-        <div class="hint" style="text-align:center;">Tip: Home keeps your settings + unlocks.</div>
+        <div class="hint" style="text-align:center;">Home keeps your settings + unlocks.</div>
       </div>
     </div>
 
@@ -37,6 +48,7 @@
       <div class="menuCard">
         <div class="title">Sky Hero Dash</div>
         <div class="subtitle">Customize your hero, pick the vibe, then fly.</div>
+        <div class="versionText" id="versionText">v13</div>
 
         <div class="menuRow">
           <button id="playButton" class="btn big">Play</button>
@@ -124,7 +136,7 @@
             <div class="field" style="grid-column: 1 / -1;">
               <div class="label">Hero Preview</div>
               <canvas id="heroPreviewCanvas" width="320" height="160"></canvas>
-              <div class="hint">Changes update instantly.</div>
+              <div class="hint">Animals now look different (ears/snouts/markings).</div>
             </div>
 
             <div class="field">
@@ -187,7 +199,7 @@
               <button id="buySpark" class="btn small">Buy Spark Trail (50)</button>
               <button id="buyNeon" class="btn small">Buy Neon Trail (120)</button>
             </div>
-            <div class="hint">Earn coins by passing buildings (+1) and grabbing power-ups (+5).</div>
+            <div class="hint">Coins: pass buildings (+1), grab power-ups (+5), end-of-run bonus.</div>
           </div>
 
           <div class="menuRow">
@@ -207,6 +219,16 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="game.js?v=12"></script>
+  <!-- Analytics (OPTIONAL): GoatCounter
+       1) Create an account + site on GoatCounter
+       2) Replace YOUR-SITE-CODE below with your code (example: bigfootrez)
+       Docs: https://goatcounter.com/help/js
+  -->
+  <script
+    data-goatcounter="https://YOUR-SITE-CODE.goatcounter.com/count"
+    async
+    src="//gc.zgo.at/count.js"></script>
+
+  <script src="game.js?v=13"></script>
 </body>
 </html>

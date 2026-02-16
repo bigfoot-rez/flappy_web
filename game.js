@@ -1,7 +1,11 @@
 // ============================
-// SKY HERO DASH (Local LB only)
-// v12: pause menu overlay + music preview fix + death freeze fix + animal heads/bodies
+// SKY HERO DASH
+// v13: splash + version display, goatcounter hook, better animal variety,
+//      powerups now help (Shield + Glide), shield now truly saves you,
+//      add short invulnerability after shield breaks (prevents instant re-hit)
 // ============================
+
+const APP_VERSION = "v13";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -22,7 +26,9 @@ const settingsPanel = document.getElementById("settingsPanel");
 const shopButton = document.getElementById("shopButton");
 const shopPanel = document.getElementById("shopPanel");
 const changeNameButton = document.getElementById("changeNameButton");
+const versionText = document.getElementById("versionText");
 
+// Settings controls
 const soundToggle = document.getElementById("soundToggle");
 const musicToggle = document.getElementById("musicToggle");
 const bgSelect = document.getElementById("bgSelect");
@@ -66,6 +72,10 @@ const overlayResume = document.getElementById("overlayResume");
 const overlayHome = document.getElementById("overlayHome");
 const overlaySettings = document.getElementById("overlaySettings");
 
+// Splash
+const splash = document.getElementById("splash");
+const splashFill = document.getElementById("splashFill");
+
 // ----------------------------
 // LocalStorage keys
 // ----------------------------
@@ -75,26 +85,28 @@ const LS = {
   coins: "skyhero_coins_v1",
   unlocks: "skyhero_unlocks_v1",
   settings: "skyhero_settings_v4",
-  cosmetics: "skyhero_cosmetics_v3", // v3 keeps animal options too
+  cosmetics: "skyhero_cosmetics_v3",
   localBoard: "skyhero_localboard_v1",
 };
 
 // ----------------------------
 // Tuning
 // ----------------------------
-const GRAVITY = 0.55;
-const LIFT = -10.0;
+const BASE_GRAVITY = 0.55;
+const BASE_LIFT = -10.0;
 
 const BUILDING_SPEED_BASE = 2.6;
 const BUILDING_WIDTH = 64;
 const GAP_SIZE = 170;
 const SPAWN_EVERY_FRAMES = 90;
 
-const POWERUP_CHANCE = 0.22;
+const POWERUP_CHANCE = 0.25;
 const POWERUP_SIZE = 18;
 
-const SHIELD_DURATION_MS = 5500;
-const SLOWMO_DURATION_MS = 4500;
+// Power-ups (player-friendly)
+const SHIELD_DURATION_MS = 8000;     // how long you can hold a shield
+const SHIELD_IFRAME_MS = 900;        // after shield breaks, invuln prevents instant re-hit
+const GLIDE_DURATION_MS = 6000;      // easier flight: reduced gravity + slightly stronger flap
 
 // Particles
 const RAIN_COUNT = 90;
@@ -112,8 +124,11 @@ let animationId = null;
 let frame = 0;
 
 let speedMult = 1;
+
+// Power-up active windows
 let shieldUntil = 0;
-let slowmoUntil = 0;
+let iframesUntil = 0;
+let glideUntil = 0;
 
 // Settings + cosmetics + unlocks
 let settings = {
@@ -129,8 +144,8 @@ let cosmetics = {
   cape: "#d10000",
   mask: "#111111",
   trail: "none",
-  body: "classic",   // classic | armored | speed | animal_cat | animal_dog | animal_fox
-  head: "classic",   // classic | helmet | hood | animal_cat | animal_dog | animal_fox
+  body: "classic",
+  head: "classic",
 };
 
 let unlocks = { spark: false, neon: false };
@@ -250,7 +265,7 @@ function renderLocalBoard() {
 }
 
 // ----------------------------
-// Canvas helper: rounded rect path (mobile-safe)
+// Canvas helper: rounded rect
 // ----------------------------
 function roundedRectPath(ctx2, x, y, w, h, r) {
   const rr = Math.max(0, Math.min(r, Math.min(w, h) / 2));
@@ -264,12 +279,12 @@ function roundedRectPath(ctx2, x, y, w, h, r) {
 }
 
 // ----------------------------
-// Audio (SFX + Music)
+// Audio
 // ----------------------------
 let audioCtx = null;
 let musicTimer = null;
 let musicStep = 0;
-let musicPreviewActive = false; // <-- key fix: prevent game loop from stopping preview
+let musicPreviewActive = false;
 
 function ensureAudio() {
   if (!settings.soundOn && !settings.musicOn) return;
@@ -301,7 +316,7 @@ function sfxParams(kind) {
   if (pack === "classic") {
     if (kind === "flap")  return { f: 420, d: 60,  t: "square",   g: 0.06 };
     if (kind === "score") return { f: 620, d: 70,  t: "sine",     g: 0.07 };
-    if (kind === "power") return { f: 840, d: 110, t: "triangle", g: 0.07 };
+    if (kind === "power") return { f: 880, d: 110, t: "triangle", g: 0.07 };
     return                { f: 160, d: 180, t: "sawtooth", g: 0.06 };
   }
   if (pack === "heroic") {
@@ -373,9 +388,7 @@ function stopMusicPreview() {
 }
 
 function ensureMusicState() {
-  // If preview is active, NEVER auto-stop it.
   if (musicPreviewActive) return;
-
   if (canPlayMusicInGame()) {
     if (!musicTimer) startMusicLoop({ force: false, preview: false });
   } else {
@@ -404,7 +417,6 @@ function initStars(arr, w, h) {
 // ----------------------------
 function showOverlay(kind) {
   overlay.classList.remove("hidden");
-
   if (kind === "paused") {
     overlayTitle.textContent = "Paused";
     overlaySubtitle.textContent = "Resume, change settings, or go home.";
@@ -433,8 +445,10 @@ function initGame() {
   frame = 0;
 
   speedMult = 1;
+
   shieldUntil = 0;
-  slowmoUntil = 0;
+  iframesUntil = 0;
+  glideUntil = 0;
 
   scoreText.textContent = "0";
   bestText.textContent = String(best);
@@ -447,10 +461,7 @@ function reset() {
 }
 
 function startPlay() {
-  // IMPORTANT FIX: if you died, we MUST reset before playing again.
   if (gameOver) reset();
-
-  // stop music preview if it was running
   stopMusicPreview();
 
   menu.classList.add("hidden");
@@ -473,7 +484,7 @@ function togglePause() {
   pauseButton.textContent = paused ? "Resume" : "Pause";
 
   if (paused) {
-    stopMusic(); // pause music
+    stopMusic();
     showOverlay("paused");
     toastMsg("Paused");
   } else {
@@ -489,7 +500,6 @@ function endGame() {
   gameOver = true;
   paused = false;
   stopMusic();
-  hideOverlay(); // ensure clean
   showOverlay("gameover");
 
   ensureAudio();
@@ -511,7 +521,7 @@ function endGame() {
 }
 
 // ----------------------------
-// Buildings + power-ups
+// Power-ups (player-friendly)
 // ----------------------------
 function spawnBuildingPair() {
   const margin = 70;
@@ -521,7 +531,7 @@ function spawnBuildingPair() {
 
   let power = null;
   if (Math.random() < POWERUP_CHANCE) {
-    const types = ["shield", "slow"];
+    const types = ["shield", "glide"];
     const t = types[Math.floor(Math.random() * types.length)];
     power = { type: t, x: canvas.width + 10 + BUILDING_WIDTH/2, y: top + GAP_SIZE/2, taken: false };
   }
@@ -530,15 +540,29 @@ function spawnBuildingPair() {
 }
 
 function buildingSpeed() {
-  let s = BUILDING_SPEED_BASE;
-  if (now() < slowmoUntil) s *= 0.6;
-  s *= speedMult;
+  // Keep it fair: don’t let speed scale too hard
+  let s = BUILDING_SPEED_BASE * speedMult;
   return s;
 }
 
+function effectiveGravity() {
+  if (now() < glideUntil) return BASE_GRAVITY * 0.35; // easier
+  return BASE_GRAVITY;
+}
+
+function effectiveLift() {
+  if (now() < glideUntil) return BASE_LIFT * 1.12; // a bit stronger flap
+  return BASE_LIFT;
+}
+
 function applyPower(type) {
-  if (type === "shield") { shieldUntil = now() + SHIELD_DURATION_MS; toastMsg("Shield ON!"); }
-  else { slowmoUntil = now() + SLOWMO_DURATION_MS; toastMsg("Slow-mo!"); }
+  if (type === "shield") {
+    shieldUntil = now() + SHIELD_DURATION_MS;
+    toastMsg("Shield ON (blocks 1 hit)");
+  } else {
+    glideUntil = now() + GLIDE_DURATION_MS;
+    toastMsg("Glide ON (easier flying)");
+  }
 
   playSfx("power");
   coins += 5;
@@ -705,20 +729,27 @@ function drawPowerup(p) {
   if (!p || p.taken) return;
   ctx.save();
   ctx.translate(p.x, p.y);
-  ctx.fillStyle = p.type === "shield" ? "rgba(0, 170, 255, 0.9)" : "rgba(180, 255, 90, 0.9)";
+
+  if (p.type === "shield") {
+    ctx.fillStyle = "rgba(0, 170, 255, 0.92)";
+  } else {
+    ctx.fillStyle = "rgba(255, 230, 90, 0.92)"; // Glide: warm yellow
+  }
+
   ctx.beginPath();
   ctx.arc(0, 0, POWERUP_SIZE, 0, Math.PI*2);
   ctx.fill();
+
   ctx.fillStyle = "#000";
   ctx.font = "14px Arial";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(p.type === "shield" ? "S" : "⏳", 0, 1);
+  ctx.fillText(p.type === "shield" ? "S" : "G", 0, 1);
   ctx.restore();
 }
 
 // ----------------------------
-// Hero drawing (animals supported)
+// Hero (animals now look distinct)
 // ----------------------------
 function drawTrail(ctx2, f, hx, hy, trail) {
   if (trail === "none") return;
@@ -751,16 +782,16 @@ function drawTrail(ctx2, f, hx, hy, trail) {
   }
 }
 
-function drawAnimalHead(ctx2, hx, hy, kind, furColor, maskColor) {
-  // head base
+function drawAnimalHead(ctx2, hx, hy, kind, furColor, accentColor) {
+  // base head
   ctx2.fillStyle = furColor;
   ctx2.beginPath();
   ctx2.arc(hx + 17, hy + 8, 10, 0, Math.PI*2);
   ctx2.fill();
 
-  // ears
-  ctx2.fillStyle = furColor;
-  if (kind === "animal_cat" || kind === "animal_fox") {
+  // ears + face shape differences
+  if (kind === "animal_cat") {
+    // pointy ears
     ctx2.beginPath();
     ctx2.moveTo(hx + 10, hy + 2);
     ctx2.lineTo(hx + 6, hy - 8);
@@ -774,50 +805,90 @@ function drawAnimalHead(ctx2, hx, hy, kind, furColor, maskColor) {
     ctx2.lineTo(hx + 20, hy - 2);
     ctx2.closePath();
     ctx2.fill();
-  } else if (kind === "animal_dog") {
-    // floppy ears
-    ctx2.globalAlpha = 0.85;
-    ctx2.beginPath();
-    ctx2.ellipse(hx + 7, hy + 8, 5, 8, 0.4, 0, Math.PI*2);
-    ctx2.fill();
-    ctx2.beginPath();
-    ctx2.ellipse(hx + 27, hy + 8, 5, 8, -0.4, 0, Math.PI*2);
-    ctx2.fill();
+
+    // whiskers
+    ctx2.globalAlpha = 0.35;
+    ctx2.strokeStyle = "#000";
+    ctx2.lineWidth = 1;
+    for (let i = -1; i <= 1; i++) {
+      ctx2.beginPath();
+      ctx2.moveTo(hx + 8, hy + 12 + i * 2);
+      ctx2.lineTo(hx + 2, hy + 12 + i * 2);
+      ctx2.stroke();
+
+      ctx2.beginPath();
+      ctx2.moveTo(hx + 26, hy + 12 + i * 2);
+      ctx2.lineTo(hx + 32, hy + 12 + i * 2);
+      ctx2.stroke();
+    }
     ctx2.globalAlpha = 1;
   }
 
-  // snout
-  ctx2.fillStyle = "rgba(255,255,255,0.55)";
-  ctx2.beginPath();
-  ctx2.ellipse(hx + 17, hy + 12, 7, 5, 0, 0, Math.PI*2);
-  ctx2.fill();
+  if (kind === "animal_dog") {
+    // floppy ears
+    ctx2.globalAlpha = 0.9;
+    ctx2.beginPath();
+    ctx2.ellipse(hx + 7, hy + 10, 5, 9, 0.35, 0, Math.PI*2);
+    ctx2.fill();
+    ctx2.beginPath();
+    ctx2.ellipse(hx + 27, hy + 10, 5, 9, -0.35, 0, Math.PI*2);
+    ctx2.fill();
+    ctx2.globalAlpha = 1;
 
-  // nose
-  ctx2.fillStyle = maskColor;
-  ctx2.beginPath();
-  ctx2.arc(hx + 17, hy + 12, 2.2, 0, Math.PI*2);
-  ctx2.fill();
+    // bigger snout
+    ctx2.fillStyle = "rgba(255,255,255,0.6)";
+    ctx2.beginPath();
+    ctx2.ellipse(hx + 17, hy + 13, 8.5, 6, 0, 0, Math.PI*2);
+    ctx2.fill();
+  }
 
-  // eyes
-  ctx2.fillStyle = "#fff";
-  ctx2.fillRect(hx + 11, hy + 7, 5, 2);
-  ctx2.fillRect(hx + 20, hy + 7, 5, 2);
-
-  // fox cheeks
   if (kind === "animal_fox") {
-    ctx2.globalAlpha = 0.25;
+    // fox ears + orange cheeks marking
+    ctx2.beginPath();
+    ctx2.moveTo(hx + 10, hy + 2);
+    ctx2.lineTo(hx + 5, hy - 9);
+    ctx2.lineTo(hx + 15, hy - 1);
+    ctx2.closePath();
+    ctx2.fill();
+
+    ctx2.beginPath();
+    ctx2.moveTo(hx + 24, hy + 2);
+    ctx2.lineTo(hx + 29, hy - 9);
+    ctx2.lineTo(hx + 19, hy - 1);
+    ctx2.closePath();
+    ctx2.fill();
+
+    ctx2.globalAlpha = 0.35;
     ctx2.fillStyle = "#fff";
     ctx2.beginPath();
     ctx2.arc(hx + 10, hy + 12, 4, 0, Math.PI*2);
     ctx2.arc(hx + 24, hy + 12, 4, 0, Math.PI*2);
     ctx2.fill();
     ctx2.globalAlpha = 1;
+
+    // slightly pointier snout
+    ctx2.fillStyle = "rgba(255,255,255,0.55)";
+    ctx2.beginPath();
+    ctx2.ellipse(hx + 17, hy + 13, 7.5, 5.2, 0, 0, Math.PI*2);
+    ctx2.fill();
   }
+
+  // nose
+  ctx2.fillStyle = accentColor;
+  ctx2.beginPath();
+  ctx2.arc(hx + 17, hy + 13, 2.2, 0, Math.PI*2);
+  ctx2.fill();
+
+  // eyes
+  ctx2.fillStyle = "#fff";
+  ctx2.fillRect(hx + 11, hy + 7, 5, 2);
+  ctx2.fillRect(hx + 20, hy + 7, 5, 2);
 }
 
 function drawHeroVariant(ctx2, f, hx, hy, opts) {
-  const { suit, cape, mask, body, head, trail, shielded } = opts;
+  const { suit, cape, mask, body, head, trail, shielded, iframes } = opts;
 
+  // Shield bubble (or invuln blink)
   if (shielded) {
     ctx2.globalAlpha = 0.22;
     ctx2.fillStyle = "#00aaff";
@@ -825,11 +896,13 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
     ctx2.arc(hx + 17, hy + 17, 30, 0, Math.PI*2);
     ctx2.fill();
     ctx2.globalAlpha = 1;
+  } else if (iframes) {
+    ctx2.globalAlpha = 0.25 + 0.25 * Math.sin(f * 0.6);
   }
 
   drawTrail(ctx2, f, hx, hy, trail);
 
-  // cape (for animals too, still fun)
+  // Cape
   const flutter = Math.sin(f * 0.2) * 4;
   ctx2.fillStyle = cape;
   ctx2.beginPath();
@@ -841,11 +914,43 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
 
   // BODY
   if (body.startsWith("animal_")) {
-    // animal torso
+    // different body silhouettes per animal
     ctx2.fillStyle = suit;
-    ctx2.beginPath();
-    ctx2.ellipse(hx + 17, hy + 22, 16, 12, 0, 0, Math.PI*2);
-    ctx2.fill();
+
+    if (body === "animal_cat") {
+      ctx2.beginPath();
+      ctx2.ellipse(hx + 17, hy + 22, 15, 11, 0, 0, Math.PI*2);
+      ctx2.fill();
+      // cat tail
+      ctx2.globalAlpha = 0.7;
+      ctx2.beginPath();
+      ctx2.ellipse(hx + 2, hy + 23, 6, 3, -0.6, 0, Math.PI*2);
+      ctx2.fill();
+      ctx2.globalAlpha = 1;
+    } else if (body === "animal_dog") {
+      ctx2.beginPath();
+      ctx2.ellipse(hx + 17, hy + 23, 16, 12.5, 0, 0, Math.PI*2);
+      ctx2.fill();
+      // dog spot
+      ctx2.globalAlpha = 0.25;
+      ctx2.fillStyle = "#000";
+      ctx2.beginPath();
+      ctx2.ellipse(hx + 22, hy + 22, 5, 4, 0.2, 0, Math.PI*2);
+      ctx2.fill();
+      ctx2.globalAlpha = 1;
+    } else {
+      // fox
+      ctx2.beginPath();
+      ctx2.ellipse(hx + 17, hy + 22, 15.5, 11.5, 0, 0, Math.PI*2);
+      ctx2.fill();
+      // fox tail tip
+      ctx2.globalAlpha = 0.7;
+      ctx2.fillStyle = "rgba(255,255,255,0.7)";
+      ctx2.beginPath();
+      ctx2.ellipse(hx + 3, hy + 24, 6, 3, -0.8, 0, Math.PI*2);
+      ctx2.fill();
+      ctx2.globalAlpha = 1;
+    }
 
     // tiny paws
     ctx2.globalAlpha = 0.25;
@@ -876,10 +981,6 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
   } else {
     ctx2.fillStyle = suit;
     ctx2.fillRect(hx, hy + 10, 34, 24);
-  }
-
-  // Belt/emblem line for non-animals (animals look better without belt)
-  if (!body.startsWith("animal_")) {
     ctx2.fillStyle = "#ffd400";
     ctx2.fillRect(hx + 6, hy + 26, 22, 4);
   }
@@ -895,8 +996,10 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
     ctx2.lineTo(hx + 6, hy + 10);
     ctx2.closePath();
     ctx2.fill();
+
     ctx2.fillStyle = mask;
     ctx2.fillRect(hx + 7, hy + 4, 20, 6);
+
     ctx2.fillStyle = "#fff";
     ctx2.fillRect(hx + 10, hy + 6, 6, 2);
     ctx2.fillRect(hx + 19, hy + 6, 6, 2);
@@ -905,12 +1008,15 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
     ctx2.beginPath();
     ctx2.arc(hx + 17, hy + 7, 12, 0, Math.PI*2);
     ctx2.fill();
+
     ctx2.fillStyle = "#ffcc99";
     ctx2.beginPath();
     ctx2.arc(hx + 17, hy + 8, 8, 0, Math.PI*2);
     ctx2.fill();
+
     ctx2.fillStyle = mask;
     ctx2.fillRect(hx + 9, hy + 6, 16, 5);
+
     ctx2.fillStyle = "#fff";
     ctx2.fillRect(hx + 11, hy + 7, 5, 2);
     ctx2.fillRect(hx + 20, hy + 7, 5, 2);
@@ -919,20 +1025,16 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
     ctx2.beginPath();
     ctx2.arc(hx + 17, hy + 6, 10, 0, Math.PI*2);
     ctx2.fill();
+
     ctx2.fillStyle = mask;
     ctx2.fillRect(hx + 7, hy + 2, 20, 6);
+
     ctx2.fillStyle = "#fff";
     ctx2.fillRect(hx + 10, hy + 4, 6, 2);
     ctx2.fillRect(hx + 19, hy + 4, 6, 2);
   }
 
-  // emblem dot (skip for animal, looks weird)
-  if (!body.startsWith("animal_")) {
-    ctx2.fillStyle = "#fff";
-    ctx2.beginPath();
-    ctx2.arc(hx + 17, hy + 20, 4, 0, Math.PI*2);
-    ctx2.fill();
-  }
+  ctx2.globalAlpha = 1;
 }
 
 function drawHero() {
@@ -944,6 +1046,7 @@ function drawHero() {
     head: cosmetics.head,
     trail: cosmetics.trail,
     shielded: now() < shieldUntil,
+    iframes: now() < iframesUntil
   });
 }
 
@@ -953,7 +1056,7 @@ function drawHero() {
 function update() {
   if (!started || gameOver || paused) return;
 
-  hero.vy += GRAVITY;
+  hero.vy += effectiveGravity();
   hero.y += hero.vy;
 
   if (hero.y + hero.h > canvas.height) { hero.y = canvas.height - hero.h; endGame(); return; }
@@ -962,6 +1065,7 @@ function update() {
   if (frame % SPAWN_EVERY_FRAMES === 0) spawnBuildingPair();
 
   const spd = buildingSpeed();
+
   for (const b of buildings) {
     b.x -= spd;
 
@@ -969,6 +1073,7 @@ function update() {
     const gapBottom = b.top + GAP_SIZE;
     const right = b.x + BUILDING_WIDTH;
 
+    // power-up pickup
     if (b.power && !b.power.taken) {
       b.power.x = b.x + BUILDING_WIDTH/2;
       const dx = (hero.x + hero.w/2) - b.power.x;
@@ -979,11 +1084,22 @@ function update() {
       }
     }
 
+    // collision
     const hit = heroHitBuilding(gapTop, gapBottom, b.x, right);
     if (hit) {
-      if (now() < shieldUntil) {
+      // If we’re in invulnerability frames, ignore collision
+      if (now() < iframesUntil) {
+        // ignore
+      } else if (now() < shieldUntil) {
+        // Shield breaks and saves you (prevents instant re-hit)
         shieldUntil = 0;
-        toastMsg("Shield saved you!");
+        iframesUntil = now() + SHIELD_IFRAME_MS;
+
+        // Push hero slightly left/up so you’re not still overlapping
+        hero.vy = Math.min(hero.vy, 0);
+        hero.y = Math.max(0, hero.y - 18);
+
+        toastMsg("Shield blocked the hit!");
         playSfx("power");
       } else {
         endGame();
@@ -991,6 +1107,7 @@ function update() {
       }
     }
 
+    // scoring
     if (!b.passed && right < hero.x) {
       b.passed = true;
       score++;
@@ -1001,7 +1118,7 @@ function update() {
       coinsText.textContent = String(coins);
       saveAll();
 
-      if (score % 10 === 0) speedMult = Math.min(1.25, speedMult + 0.05);
+      if (score % 12 === 0) speedMult = Math.min(1.18, speedMult + 0.03);
     }
   }
 
@@ -1020,6 +1137,17 @@ function draw() {
   }
 
   drawHero();
+
+  // Small status text
+  ctx.globalAlpha = 0.9;
+  ctx.fillStyle = "rgba(0,0,0,0.6)";
+  ctx.font = "12px Arial";
+  const shieldOn = now() < shieldUntil ? "Shield" : "";
+  const glideOn = now() < glideUntil ? "Glide" : "";
+  const ifr = now() < iframesUntil ? "Safe" : "";
+  const buffs = [shieldOn, glideOn, ifr].filter(Boolean).join(" • ");
+  if (buffs) ctx.fillText(buffs, 12, 18);
+  ctx.globalAlpha = 1;
 
   if (paused) {
     ctx.globalAlpha = 0.15;
@@ -1058,6 +1186,7 @@ function drawHeroPreview() {
     head: cosmetics.head,
     trail: cosmetics.trail,
     shielded: false,
+    iframes: false,
   });
 }
 
@@ -1080,7 +1209,6 @@ canvas.addEventListener("pointerdown", (e) => {
   e.preventDefault();
   ensureAudio();
 
-  // If game over, tapping canvas restarts immediately (no pull-to-refresh needed)
   if (gameOver) {
     reset();
     startPlay();
@@ -1088,7 +1216,7 @@ canvas.addEventListener("pointerdown", (e) => {
   }
 
   if (menu.classList.contains("hidden") && !paused) {
-    hero.vy = LIFT;
+    hero.vy = effectiveLift();
     playSfx("flap");
   }
 }, { passive: false });
@@ -1105,7 +1233,7 @@ document.addEventListener("keydown", (e) => {
   }
 
   if (menu.classList.contains("hidden") && !paused) {
-    hero.vy = LIFT;
+    hero.vy = effectiveLift();
     playSfx("flap");
   }
 });
@@ -1133,12 +1261,8 @@ changeNameButton.addEventListener("click", () => promptName());
 
 // Overlay buttons
 overlayResume.addEventListener("click", () => {
-  if (gameOver) {
-    reset();
-    startPlay();
-  } else {
-    togglePause(); // resumes
-  }
+  if (gameOver) { reset(); startPlay(); }
+  else { togglePause(); }
 });
 overlayHome.addEventListener("click", () => {
   paused = false;
@@ -1152,7 +1276,6 @@ overlayHome.addEventListener("click", () => {
   shopPanel.classList.add("hidden");
 });
 overlaySettings.addEventListener("click", () => {
-  // Go to home + open settings
   paused = false;
   hideOverlay();
   stopMusicPreview();
@@ -1189,7 +1312,7 @@ musicSelect.addEventListener("change", () => {
   toastMsg(`Track: ${musicSelect.options[musicSelect.selectedIndex].text}`);
 });
 
-// Music preview (FIXED)
+// Music preview
 musicPlayPreview.addEventListener("click", () => {
   ensureAudio();
   if (!audioCtx) return toastMsg("Tap the game canvas once, then try preview.");
@@ -1253,9 +1376,30 @@ buyNeon.addEventListener("click", () => {
 });
 
 // ----------------------------
+// Splash boot animation
+// ----------------------------
+function runSplash() {
+  if (!splash || !splashFill) return;
+  let pct = 0;
+  const t = setInterval(() => {
+    pct = Math.min(100, pct + 12);
+    splashFill.style.width = pct + "%";
+    if (pct >= 100) {
+      clearInterval(t);
+      setTimeout(() => splash.style.display = "none", 150);
+    }
+  }, 120);
+}
+
+// ----------------------------
 // Boot
 // ----------------------------
 (function boot() {
+  // version label
+  if (versionText) versionText.textContent = APP_VERSION;
+
+  runSplash();
+
   loadAll();
 
   const name = ensureName();
