@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <meta name="theme-color" content="#0b1220" />
   <title>Sky Hero Dash</title>
-  <link rel="stylesheet" href="style.css?v=14" />
+
+  <!-- cache-bust -->
+  <link rel="stylesheet" href="style.css?v=15" />
 </head>
 <body>
   <!-- Splash -->
@@ -29,7 +31,7 @@
 
     <canvas id="gameCanvas" width="400" height="600"></canvas>
 
-    <!-- PAUSE / GAMEOVER OVERLAY (starts hidden always) -->
+    <!-- Overlay (starts hidden) -->
     <div id="overlay" class="overlay hidden">
       <div class="overlayCard">
         <div id="overlayTitle" class="overlayTitle">Paused</div>
@@ -43,19 +45,19 @@
       </div>
     </div>
 
-    <!-- HOME / MENU -->
+    <!-- Home -->
     <div id="menu" class="menu">
       <div class="menuCard">
         <div class="title">Sky Hero Dash</div>
         <div class="subtitle">Customize your hero, pick the vibe, then fly.</div>
-        <div class="versionText" id="versionText">v14</div>
+        <div class="versionText" id="versionText">v15</div>
 
         <div class="menuRow">
           <button id="playButton" class="btn big">Play</button>
           <button id="settingsButton" class="btn big secondary">Settings</button>
         </div>
 
-        <!-- SETTINGS (SCROLLABLE) -->
+        <!-- Settings (scrollable) -->
         <div id="settingsPanel" class="panel hidden scrollPanel">
           <div class="panelTitle">Settings</div>
 
@@ -227,12 +229,7 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <!-- Analytics (optional): GoatCounter placeholder -->
-  <script
-    data-goatcounter="https://YOUR-SITE-CODE.goatcounter.com/count"
-    async
-    src="//gc.zgo.at/count.js"></script>
-
-  <script src="game.js?v=14"></script>
+  <!-- cache-bust -->
+  <script src="game.js?v=15"></script>
 </body>
 </html>

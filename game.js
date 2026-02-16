@@ -1,10 +1,10 @@
 // ============================
 // SKY HERO DASH
-// v14: hard-fix stuck overlay, add Bee + Skeleton, make Cat vs Fox clearly different,
-//      keep Shield + Glide powerups, add more unlockables (Smoke + Confetti)
+// v15: restore full game.js, fix overlay stuck (CSS handled in v15 style.css),
+//      bee + skeleton added, cat vs fox heads distinct, shield blocks 1 hit, glide is easier flying
 // ============================
 
-const APP_VERSION = "v14";
+const APP_VERSION = "v15";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -65,7 +65,7 @@ const buyConfetti = document.getElementById("buyConfetti");
 const localLeaderboardEl = document.getElementById("localLeaderboard");
 const toast = document.getElementById("toast");
 
-// Overlay (pause/gameover)
+// Overlay
 const overlay = document.getElementById("overlay");
 const overlayTitle = document.getElementById("overlayTitle");
 const overlaySubtitle = document.getElementById("overlaySubtitle");
@@ -84,9 +84,9 @@ const LS = {
   name: "skyhero_name_v1",
   best: "skyhero_best_v1",
   coins: "skyhero_coins_v1",
-  unlocks: "skyhero_unlocks_v2",      // bumped: added smoke/confetti
+  unlocks: "skyhero_unlocks_v2",
   settings: "skyhero_settings_v4",
-  cosmetics: "skyhero_cosmetics_v4",  // bumped: added bee/skeleton
+  cosmetics: "skyhero_cosmetics_v4",
   localBoard: "skyhero_localboard_v1",
 };
 
@@ -123,10 +123,8 @@ let previewStars = [];
 let hero, buildings, score, best, gameOver, started, paused;
 let animationId = null;
 let frame = 0;
-
 let speedMult = 1;
 
-// Power-up windows
 let shieldUntil = 0;
 let iframesUntil = 0;
 let glideUntil = 0;
@@ -145,7 +143,7 @@ let cosmetics = {
   cape: "#d10000",
   mask: "#111111",
   trail: "none",
-  body: "classic",  // includes bee/skeleton
+  body: "classic",
   head: "classic",
 };
 
@@ -186,15 +184,6 @@ function loadAll() {
   unlocks = { ...unlocks, ...loadJSON(LS.unlocks, unlocks) };
   coins = Math.max(0, Number(localStorage.getItem(LS.coins) || "0"));
 
-  // unlock gating
-  const trailNeeds = {
-    spark: "spark",
-    neon: "neon",
-    smoke: "smoke",
-    confetti: "confetti"
-  };
-  if (cosmetics.trail in trailNeeds && !unlocks[trailNeeds[cosmetics.trail]]) cosmetics.trail = "none";
-
   const bgOK = new Set(["city_day", "city_night", "cloudy", "rainy"]);
   if (!bgOK.has(settings.background)) settings.background = "city_day";
 
@@ -212,6 +201,9 @@ function loadAll() {
   ]);
   if (!partOK.has(cosmetics.body)) cosmetics.body = "classic";
   if (!partOK.has(cosmetics.head)) cosmetics.head = "classic";
+
+  // trail lock safety
+  if (cosmetics.trail !== "none" && !unlocks[cosmetics.trail]) cosmetics.trail = "none";
 }
 
 function getName() { return localStorage.getItem(LS.name) || ""; }
@@ -291,7 +283,7 @@ function roundedRectPath(ctx2, x, y, w, h, r) {
 }
 
 // ----------------------------
-// Audio
+// Audio (simple synth)
 // ----------------------------
 let audioCtx = null;
 let musicTimer = null;
@@ -425,16 +417,13 @@ function initStars(arr, w, h) {
 }
 
 // ----------------------------
-// Overlay helpers (HARD FIX)
+// Overlay helpers
 // ----------------------------
 function hideOverlayHard() {
-  // always force hidden + stop stuck state
   overlay.classList.add("hidden");
   paused = false;
-  // don’t change gameOver here; just make UI usable
   pauseButton.textContent = "Pause";
 }
-
 function showOverlay(kind) {
   overlay.classList.remove("hidden");
   if (kind === "paused") {
@@ -447,17 +436,12 @@ function showOverlay(kind) {
     overlayResume.textContent = "Play Again";
   }
 }
-
-// Tap outside overlay card closes it (if paused/gameover)
 overlay.addEventListener("pointerdown", (e) => {
-  if (e.target === overlay) {
-    // if game over, keep overlay (needs button)
-    if (!gameOver) {
-      paused = false;
-      hideOverlayHard();
-      ensureMusicState();
-      toastMsg("Resumed");
-    }
+  if (e.target === overlay && !gameOver) {
+    paused = false;
+    hideOverlayHard();
+    ensureMusicState();
+    toastMsg("Resumed");
   }
 }, { passive: true });
 
@@ -473,7 +457,6 @@ function initGame() {
   started = false;
   paused = false;
   frame = 0;
-
   speedMult = 1;
 
   shieldUntil = 0;
@@ -484,7 +467,6 @@ function initGame() {
   bestText.textContent = String(best);
   pauseButton.textContent = "Pause";
 
-  // critical: overlay must start hidden
   hideOverlayHard();
 }
 
@@ -555,7 +537,7 @@ function endGame() {
 }
 
 // ----------------------------
-// Power-ups (Shield + Glide)
+// Power-ups
 // ----------------------------
 function spawnBuildingPair() {
   const margin = 70;
@@ -576,12 +558,10 @@ function spawnBuildingPair() {
 function buildingSpeed() {
   return BUILDING_SPEED_BASE * speedMult;
 }
-
 function effectiveGravity() {
   if (now() < glideUntil) return BASE_GRAVITY * 0.35;
   return BASE_GRAVITY;
 }
-
 function effectiveLift() {
   if (now() < glideUntil) return BASE_LIFT * 1.12;
   return BASE_LIFT;
@@ -611,7 +591,7 @@ function heroHitBuilding(gapTop, gapBottom, bX, bRight) {
 }
 
 // ----------------------------
-// Background renderer (same as before)
+// Background rendering
 // ----------------------------
 function drawClouds(ctx2, f, w, h, strength=1) {
   ctx2.globalAlpha = 0.18 * strength;
@@ -627,6 +607,7 @@ function drawClouds(ctx2, f, w, h, strength=1) {
   }
   ctx2.globalAlpha = 1;
 }
+
 function drawStars(ctx2, f, starArr) {
   ctx2.save();
   ctx2.fillStyle = "#fff";
@@ -640,6 +621,7 @@ function drawStars(ctx2, f, starArr) {
   ctx2.restore();
   ctx2.globalAlpha = 1;
 }
+
 function drawRain(ctx2, dropArr, w, h) {
   ctx2.save();
   ctx2.globalAlpha = 0.35;
@@ -658,12 +640,14 @@ function drawRain(ctx2, dropArr, w, h) {
   ctx2.restore();
   ctx2.globalAlpha = 1;
 }
+
 function skylineColors(bg) {
   if (bg === "city_night") return { c1:"#0d1433", c2:"#121a44", c3:"#1a2358" };
   if (bg === "rainy")      return { c1:"#2f3a4a", c2:"#3b475b", c3:"#4a5870" };
   if (bg === "cloudy")     return { c1:"#3a3f55", c2:"#4a5070", c3:"#59628a" };
   return { c1:"#2b2b4f", c2:"#3a3a67", c3:"#4b4b85" };
 }
+
 function drawSkylineLayer(ctx2, f, w, color, baseY, alpha, speed) {
   ctx2.globalAlpha = alpha;
   ctx2.fillStyle = color;
@@ -675,6 +659,7 @@ function drawSkylineLayer(ctx2, f, w, color, baseY, alpha, speed) {
   }
   ctx2.globalAlpha = 1;
 }
+
 function drawBackground(ctx2, f, w, h, bg, starArr, rainArr) {
   if (bg === "city_night") {
     const sky = ctx2.createLinearGradient(0,0,0,h);
@@ -716,7 +701,7 @@ function drawBackground(ctx2, f, w, h, bg, starArr, rainArr) {
 }
 
 // ----------------------------
-// Buildings + powerup visuals
+// Buildings + powerups visuals
 // ----------------------------
 function drawBuilding(x, y, width, height) {
   ctx.fillStyle = "#7a0a0a";
@@ -764,7 +749,7 @@ function drawPowerup(p) {
 
   ctx.fillStyle = (p.type === "shield")
     ? "rgba(0, 170, 255, 0.92)"
-    : "rgba(255, 230, 90, 0.92)"; // Glide
+    : "rgba(255, 230, 90, 0.92)";
 
   ctx.beginPath();
   ctx.arc(0, 0, POWERUP_SIZE, 0, Math.PI*2);
@@ -784,7 +769,6 @@ function drawPowerup(p) {
 // ----------------------------
 function drawTrail(ctx2, f, hx, hy, trail) {
   if (trail === "none") return;
-
   const x = hx - 6;
   const y = hy + 18;
 
@@ -840,14 +824,13 @@ function drawTrail(ctx2, f, hx, hy, trail) {
 }
 
 function drawAnimalHead(ctx2, hx, hy, kind, furColor, accentColor) {
-  // base head
   ctx2.fillStyle = furColor;
   ctx2.beginPath();
   ctx2.arc(hx + 17, hy + 8, 10, 0, Math.PI*2);
   ctx2.fill();
 
   if (kind === "animal_cat") {
-    // sharper ears + whiskers (cat)
+    // cat: sharp ears + whiskers + tiny triangle nose
     ctx2.beginPath();
     ctx2.moveTo(hx + 10, hy + 2);
     ctx2.lineTo(hx + 6, hy - 9);
@@ -862,7 +845,6 @@ function drawAnimalHead(ctx2, hx, hy, kind, furColor, accentColor) {
     ctx2.closePath();
     ctx2.fill();
 
-    // cat whiskers
     ctx2.globalAlpha = 0.40;
     ctx2.strokeStyle = "#000";
     ctx2.lineWidth = 1;
@@ -879,7 +861,6 @@ function drawAnimalHead(ctx2, hx, hy, kind, furColor, accentColor) {
     }
     ctx2.globalAlpha = 1;
 
-    // small triangular nose (cat)
     ctx2.fillStyle = accentColor;
     ctx2.beginPath();
     ctx2.moveTo(hx + 17, hy + 14);
@@ -890,7 +871,7 @@ function drawAnimalHead(ctx2, hx, hy, kind, furColor, accentColor) {
   }
 
   if (kind === "animal_dog") {
-    // floppy ears
+    // dog: floppy ears + snout
     ctx2.globalAlpha = 0.9;
     ctx2.beginPath();
     ctx2.ellipse(hx + 7, hy + 10, 5, 9, 0.35, 0, Math.PI*2);
@@ -900,7 +881,6 @@ function drawAnimalHead(ctx2, hx, hy, kind, furColor, accentColor) {
     ctx2.fill();
     ctx2.globalAlpha = 1;
 
-    // bigger snout
     ctx2.fillStyle = "rgba(255,255,255,0.6)";
     ctx2.beginPath();
     ctx2.ellipse(hx + 17, hy + 13, 8.5, 6, 0, 0, Math.PI*2);
@@ -913,7 +893,7 @@ function drawAnimalHead(ctx2, hx, hy, kind, furColor, accentColor) {
   }
 
   if (kind === "animal_fox") {
-    // fox: tall ears + white cheeks + longer snout
+    // fox: taller ears + white cheeks + longer snout
     ctx2.beginPath();
     ctx2.moveTo(hx + 10, hy + 2);
     ctx2.lineTo(hx + 4, hy - 12);
@@ -928,7 +908,6 @@ function drawAnimalHead(ctx2, hx, hy, kind, furColor, accentColor) {
     ctx2.closePath();
     ctx2.fill();
 
-    // white cheeks (fox)
     ctx2.globalAlpha = 0.45;
     ctx2.fillStyle = "#fff";
     ctx2.beginPath();
@@ -937,7 +916,6 @@ function drawAnimalHead(ctx2, hx, hy, kind, furColor, accentColor) {
     ctx2.fill();
     ctx2.globalAlpha = 1;
 
-    // longer snout
     ctx2.fillStyle = "rgba(255,255,255,0.55)";
     ctx2.beginPath();
     ctx2.ellipse(hx + 18, hy + 14, 8.5, 5.2, 0.2, 0, Math.PI*2);
@@ -949,14 +927,13 @@ function drawAnimalHead(ctx2, hx, hy, kind, furColor, accentColor) {
     ctx2.fill();
   }
 
-  // eyes (common)
+  // eyes
   ctx2.fillStyle = "#fff";
   ctx2.fillRect(hx + 11, hy + 7, 5, 2);
   ctx2.fillRect(hx + 20, hy + 7, 5, 2);
 }
 
 function drawBeeHead(ctx2, hx, hy) {
-  // bee head is yellow with black stripe + antennae
   ctx2.fillStyle = "#ffd400";
   ctx2.beginPath();
   ctx2.arc(hx + 17, hy + 8, 10, 0, Math.PI*2);
@@ -967,7 +944,6 @@ function drawBeeHead(ctx2, hx, hy) {
   ctx2.fillRect(hx + 9, hy + 6, 16, 3);
   ctx2.globalAlpha = 1;
 
-  // antennae
   ctx2.strokeStyle = "#000";
   ctx2.lineWidth = 2;
   ctx2.beginPath();
@@ -979,7 +955,6 @@ function drawBeeHead(ctx2, hx, hy) {
   ctx2.lineTo(hx + 24, hy - 8);
   ctx2.stroke();
 
-  // eyes
   ctx2.fillStyle = "#fff";
   ctx2.fillRect(hx + 11, hy + 7, 5, 2);
   ctx2.fillRect(hx + 20, hy + 7, 5, 2);
@@ -991,14 +966,12 @@ function drawSkeletonHead(ctx2, hx, hy) {
   ctx2.arc(hx + 17, hy + 8, 10, 0, Math.PI*2);
   ctx2.fill();
 
-  // eyes sockets
   ctx2.fillStyle = "#111";
   ctx2.beginPath();
   ctx2.arc(hx + 13, hy + 8, 2.8, 0, Math.PI*2);
   ctx2.arc(hx + 21, hy + 8, 2.8, 0, Math.PI*2);
   ctx2.fill();
 
-  // teeth
   ctx2.globalAlpha = 0.5;
   ctx2.fillStyle = "#111";
   ctx2.fillRect(hx + 11, hy + 14, 12, 2);
@@ -1008,7 +981,6 @@ function drawSkeletonHead(ctx2, hx, hy) {
 function drawHeroVariant(ctx2, f, hx, hy, opts) {
   const { suit, cape, mask, body, head, trail, shielded, iframes } = opts;
 
-  // shield / i-frames
   if (shielded) {
     ctx2.globalAlpha = 0.22;
     ctx2.fillStyle = "#00aaff";
@@ -1022,7 +994,6 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
 
   drawTrail(ctx2, f, hx, hy, trail);
 
-  // Cape (skip for skeleton + bee, looks better without)
   const capeAllowed = !(body === "skeleton" || body === "bee");
   if (capeAllowed) {
     const flutter = Math.sin(f * 0.2) * 4;
@@ -1035,9 +1006,8 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
     ctx2.fill();
   }
 
-  // BODY
+  // body
   if (body === "bee") {
-    // bee body with stripes + wings
     ctx2.fillStyle = "#ffd400";
     ctx2.beginPath();
     ctx2.ellipse(hx + 17, hy + 22, 16, 12, 0, 0, Math.PI*2);
@@ -1050,7 +1020,6 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
     ctx2.fillRect(hx + 6, hy + 28, 22, 3);
     ctx2.globalAlpha = 1;
 
-    // wings
     ctx2.globalAlpha = 0.35;
     ctx2.fillStyle = "#b9f2ff";
     ctx2.beginPath();
@@ -1059,7 +1028,6 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
     ctx2.fill();
     ctx2.globalAlpha = 1;
   } else if (body === "skeleton") {
-    // ribcage box + spine
     ctx2.fillStyle = "#f1f1f1";
     roundedRectPath(ctx2, hx + 4, hy + 10, 26, 24, 6);
     ctx2.fill();
@@ -1073,7 +1041,6 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
       ctx2.lineTo(hx + 27, hy + 14 + i * 5);
       ctx2.stroke();
     }
-    // spine
     ctx2.beginPath();
     ctx2.moveTo(hx + 17, hy + 12);
     ctx2.lineTo(hx + 17, hy + 33);
@@ -1081,22 +1048,17 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
     ctx2.globalAlpha = 1;
   } else if (body.startsWith("animal_")) {
     ctx2.fillStyle = suit;
+    ctx2.beginPath();
+    ctx2.ellipse(hx + 17, hy + 22, 15.5, 11.5, 0, 0, Math.PI*2);
+    ctx2.fill();
 
     if (body === "animal_cat") {
-      ctx2.beginPath();
-      ctx2.ellipse(hx + 17, hy + 22, 15, 11, 0, 0, Math.PI*2);
-      ctx2.fill();
-      // tail
       ctx2.globalAlpha = 0.7;
       ctx2.beginPath();
       ctx2.ellipse(hx + 2, hy + 23, 6, 3, -0.6, 0, Math.PI*2);
       ctx2.fill();
       ctx2.globalAlpha = 1;
     } else if (body === "animal_dog") {
-      ctx2.beginPath();
-      ctx2.ellipse(hx + 17, hy + 23, 16, 12.5, 0, 0, Math.PI*2);
-      ctx2.fill();
-      // spot
       ctx2.globalAlpha = 0.25;
       ctx2.fillStyle = "#000";
       ctx2.beginPath();
@@ -1104,10 +1066,6 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
       ctx2.fill();
       ctx2.globalAlpha = 1;
     } else {
-      // fox body + white tip tail
-      ctx2.beginPath();
-      ctx2.ellipse(hx + 17, hy + 22, 15.5, 11.5, 0, 0, Math.PI*2);
-      ctx2.fill();
       ctx2.globalAlpha = 0.7;
       ctx2.fillStyle = "rgba(255,255,255,0.7)";
       ctx2.beginPath();
@@ -1115,15 +1073,6 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
       ctx2.fill();
       ctx2.globalAlpha = 1;
     }
-
-    // paws
-    ctx2.globalAlpha = 0.25;
-    ctx2.fillStyle = "#000";
-    ctx2.beginPath();
-    ctx2.arc(hx + 9, hy + 30, 2, 0, Math.PI*2);
-    ctx2.arc(hx + 25, hy + 30, 2, 0, Math.PI*2);
-    ctx2.fill();
-    ctx2.globalAlpha = 1;
   } else if (body === "armored") {
     ctx2.fillStyle = suit;
     ctx2.fillRect(hx, hy + 10, 34, 24);
@@ -1149,14 +1098,11 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
     ctx2.fillRect(hx + 6, hy + 26, 22, 4);
   }
 
-  // HEAD
-  if (head === "bee") {
-    drawBeeHead(ctx2, hx, hy);
-  } else if (head === "skeleton") {
-    drawSkeletonHead(ctx2, hx, hy);
-  } else if (head.startsWith("animal_")) {
-    drawAnimalHead(ctx2, hx, hy, head, suit, mask);
-  } else if (head === "helmet") {
+  // head
+  if (head === "bee") drawBeeHead(ctx2, hx, hy);
+  else if (head === "skeleton") drawSkeletonHead(ctx2, hx, hy);
+  else if (head.startsWith("animal_")) drawAnimalHead(ctx2, hx, hy, head, suit, mask);
+  else if (head === "helmet") {
     ctx2.fillStyle = "#c7c7c7";
     ctx2.beginPath();
     ctx2.arc(hx + 17, hy + 6, 11, Math.PI, 0);
@@ -1222,8 +1168,8 @@ function drawHero() {
 // Update + draw loop
 // ----------------------------
 function update() {
-  // if overlay somehow visible while not paused/gameOver, force hide (extra safety)
   if (!paused && !gameOver && !overlay.classList.contains("hidden")) {
+    // extra safety: if overlay shows while not paused/gameover, hide it
     hideOverlayHard();
   }
 
@@ -1246,7 +1192,6 @@ function update() {
     const gapBottom = b.top + GAP_SIZE;
     const right = b.x + BUILDING_WIDTH;
 
-    // power-up pickup
     if (b.power && !b.power.taken) {
       b.power.x = b.x + BUILDING_WIDTH/2;
       const dx = (hero.x + hero.w/2) - b.power.x;
@@ -1257,7 +1202,6 @@ function update() {
       }
     }
 
-    // collision
     const hit = heroHitBuilding(gapTop, gapBottom, b.x, right);
     if (hit) {
       if (now() < iframesUntil) {
@@ -1265,11 +1209,8 @@ function update() {
       } else if (now() < shieldUntil) {
         shieldUntil = 0;
         iframesUntil = now() + SHIELD_IFRAME_MS;
-
-        // nudge out of collision
         hero.vy = Math.min(hero.vy, 0);
         hero.y = Math.max(0, hero.y - 18);
-
         toastMsg("Shield blocked the hit!");
         playSfx("power");
       } else {
@@ -1278,7 +1219,6 @@ function update() {
       }
     }
 
-    // scoring
     if (!b.passed && right < hero.x) {
       b.passed = true;
       score++;
@@ -1309,7 +1249,6 @@ function draw() {
 
   drawHero();
 
-  // small status text
   ctx.globalAlpha = 0.9;
   ctx.fillStyle = "rgba(0,0,0,0.6)";
   ctx.font = "12px Arial";
@@ -1381,7 +1320,7 @@ canvas.addEventListener("pointerdown", (e) => {
   e.preventDefault();
   ensureAudio();
 
-  // if overlay stuck for any reason, a canvas tap clears it if not gameover
+  // If overlay is showing while not gameOver, a tap clears it (extra safety)
   if (!overlay.classList.contains("hidden") && !gameOver) {
     paused = false;
     hideOverlayHard();
@@ -1403,7 +1342,6 @@ canvas.addEventListener("pointerdown", (e) => {
 
 document.addEventListener("keydown", (e) => {
   if (e.code === "Escape") {
-    // ESC always clears overlay if not gameover
     if (!overlay.classList.contains("hidden") && !gameOver) {
       paused = false;
       hideOverlayHard();
@@ -1411,7 +1349,6 @@ document.addEventListener("keydown", (e) => {
     }
     return;
   }
-
   if (e.code !== "Space") return;
   e.preventDefault();
   ensureAudio();
@@ -1592,7 +1529,6 @@ function runSplash() {
   const name = ensureName();
   playerNameText.textContent = name;
 
-  // particles
   initRain(rainDrops, canvas.width, canvas.height);
   initStars(stars, canvas.width, canvas.height);
   if (previewCanvas) {
@@ -1600,7 +1536,6 @@ function runSplash() {
     initStars(previewStars, previewCanvas.width, previewCanvas.height);
   }
 
-  // apply UI settings
   soundToggle.checked = !!settings.soundOn;
   musicToggle.checked = !!settings.musicOn;
   bgSelect.value = settings.background;
@@ -1614,7 +1549,6 @@ function runSplash() {
   capeColor.value = cosmetics.cape;
   maskColor.value = cosmetics.mask;
 
-  // lock-safe default
   if (cosmetics.trail !== "none" && !unlocks[cosmetics.trail]) cosmetics.trail = "none";
   trailSelect.value = cosmetics.trail;
 

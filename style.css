@@ -143,8 +143,6 @@ canvas{
   margin-top: 6px;
 }
 
-.hidden{ display: none; }
-
 .grid{
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -238,7 +236,6 @@ canvas{
   box-sizing: border-box;
 }
 
-/* helps prevent “can’t click” issues on some mobile browsers */
 .overlay, .overlayCard, .btn { touch-action: manipulation; }
 
 .overlayTitle{
@@ -307,3 +304,6 @@ canvas{
   font-size: 12px;
   opacity: 0.8;
 }
+
+/* ✅ CRITICAL: must be LAST so it beats .overlay { display:grid } */
+.hidden{ display: none !important; }
