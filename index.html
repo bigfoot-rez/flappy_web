@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Sky Hero Dash</title>
-  <link rel="stylesheet" href="style.css?v=7" />
+  <link rel="stylesheet" href="style.css?v=8" />
 </head>
 <body>
   <div id="app">
@@ -36,6 +36,19 @@
             <input id="soundToggle" type="checkbox" />
             <span>Sound</span>
           </label>
+
+          <div class="panelTitle">Background</div>
+          <div class="grid">
+            <div class="field" style="grid-column: 1 / -1;">
+              <div class="label">Theme</div>
+              <select id="bgSelect">
+                <option value="city_day">City (Day)</option>
+                <option value="city_night">Night (City)</option>
+                <option value="cloudy">Cloudy</option>
+                <option value="rainy">Rainy (City)</option>
+              </select>
+            </div>
+          </div>
 
           <div class="panelTitle">Customize Hero</div>
           <div class="grid">
@@ -92,6 +105,6 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="game.js?v=7"></script>
+  <script src="game.js?v=8"></script>
 </body>
 </html>

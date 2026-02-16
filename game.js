@@ -1,6 +1,6 @@
 // ============================
 // SKY HERO DASH (Local LB only)
-// v7 (cache-bust handled in index.html)
+// Background themes v8
 // ============================
 
 const canvas = document.getElementById("gameCanvas");
@@ -24,6 +24,8 @@ const shopPanel = document.getElementById("shopPanel");
 const changeNameButton = document.getElementById("changeNameButton");
 
 const soundToggle = document.getElementById("soundToggle");
+const bgSelect = document.getElementById("bgSelect");
+
 const suitColor = document.getElementById("suitColor");
 const capeColor = document.getElementById("capeColor");
 const maskColor = document.getElementById("maskColor");
@@ -44,7 +46,7 @@ const LS = {
   best: "skyhero_best_v1",
   coins: "skyhero_coins_v1",
   unlocks: "skyhero_unlocks_v1",
-  settings: "skyhero_settings_v1",
+  settings: "skyhero_settings_v2",   // bumped because we added background theme
   cosmetics: "skyhero_cosmetics_v1",
   localBoard: "skyhero_localboard_v1",
 };
@@ -66,6 +68,14 @@ const POWERUP_SIZE = 18;
 const SHIELD_DURATION_MS = 5500;
 const SLOWMO_DURATION_MS = 4500;
 
+// Rain particles
+const RAIN_COUNT = 90;
+let rainDrops = [];
+
+// Stars for night
+const STAR_COUNT = 55;
+let stars = [];
+
 // ----------------------------
 // State
 // ----------------------------
@@ -78,7 +88,10 @@ let shieldUntil = 0;
 let slowmoUntil = 0;
 
 // Settings + cosmetics + unlocks
-let settings = { soundOn: true };
+let settings = {
+  soundOn: true,
+  background: "city_day", // city_day | city_night | cloudy | rainy
+};
 let cosmetics = { suit: "#1f4bff", cape: "#d10000", mask: "#111111", trail: "none" };
 let unlocks = { spark: false, neon: false };
 let coins = 0;
@@ -120,6 +133,10 @@ function loadAll() {
   // enforce unlock rules
   if (cosmetics.trail === "spark" && !unlocks.spark) cosmetics.trail = "none";
   if (cosmetics.trail === "neon" && !unlocks.neon) cosmetics.trail = "none";
+
+  // validate background
+  const allowed = new Set(["city_day", "city_night", "cloudy", "rainy"]);
+  if (!allowed.has(settings.background)) settings.background = "city_day";
 }
 
 function getName() {
@@ -136,10 +153,7 @@ function promptName() {
   const current = getName();
   const entered = prompt("Pick a nickname (max 16 chars):", current || "");
   if (entered === null) return;
-  if (!setName(entered)) {
-    alert("Nickname can’t be empty.");
-    return;
-  }
+  if (!setName(entered)) alert("Nickname can’t be empty.");
   renderLocalBoard();
 }
 function ensureName() {
@@ -191,7 +205,7 @@ function renderLocalBoard() {
 }
 
 // ----------------------------
-// Sound (no files; tones)
+// Sound (tones)
 // ----------------------------
 let audioCtx = null;
 
@@ -225,6 +239,33 @@ function sfxFlap() { beep(420, 60, "square", 0.05); }
 function sfxScore() { beep(620, 70, "sine", 0.06); }
 function sfxPower() { beep(840, 110, "triangle", 0.06); }
 function sfxCrash() { beep(160, 180, "sawtooth", 0.05); }
+
+// ----------------------------
+// Theme particles (rain/stars)
+// ----------------------------
+function initRain() {
+  rainDrops = [];
+  for (let i = 0; i < RAIN_COUNT; i++) {
+    rainDrops.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      vy: 6 + Math.random() * 7,
+      len: 10 + Math.random() * 14,
+    });
+  }
+}
+
+function initStars() {
+  stars = [];
+  for (let i = 0; i < STAR_COUNT; i++) {
+    stars.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * (canvas.height * 0.65),
+      r: 0.6 + Math.random() * 1.4,
+      tw: Math.random() * Math.PI * 2,
+    });
+  }
+}
 
 // ----------------------------
 // Game lifecycle
@@ -337,7 +378,6 @@ function applyPower(type) {
   saveAll();
 }
 
-// collision test
 function heroHitBuilding(gapTop, gapBottom, bX, bRight) {
   const heroRight = hero.x + hero.w;
   const heroBottom = hero.y + hero.h;
@@ -349,14 +389,118 @@ function heroHitBuilding(gapTop, gapBottom, bX, bRight) {
 }
 
 // ----------------------------
-// Drawing: sky + parallax city + buildings + hero
+// Drawing: backgrounds
 // ----------------------------
+function drawClouds(strength = 1) {
+  ctx.globalAlpha = 0.18 * strength;
+  ctx.fillStyle = "#ffffff";
+  for (let i = 0; i < 6; i++) {
+    const cx = (i * 120 + (frame * 0.5)) % (canvas.width + 160) - 80;
+    const cy = 70 + (i % 3) * 48;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 22, 0, Math.PI * 2);
+    ctx.arc(cx + 22, cy + 6, 18, 0, Math.PI * 2);
+    ctx.arc(cx - 22, cy + 8, 16, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawStars() {
+  ctx.save();
+  ctx.fillStyle = "#fff";
+  for (const s of stars) {
+    const tw = 0.55 + 0.45 * Math.sin(frame * 0.03 + s.tw);
+    ctx.globalAlpha = 0.25 + 0.55 * tw;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+function drawRain() {
+  ctx.save();
+  ctx.globalAlpha = 0.35;
+  ctx.strokeStyle = "#d7f3ff";
+  ctx.lineWidth = 1;
+
+  for (const d of rainDrops) {
+    ctx.beginPath();
+    ctx.moveTo(d.x, d.y);
+    ctx.lineTo(d.x - 2, d.y + d.len);
+    ctx.stroke();
+
+    d.y += d.vy;
+    d.x -= 0.7;
+
+    if (d.y > canvas.height + 20) {
+      d.y = -20;
+      d.x = Math.random() * canvas.width;
+    }
+    if (d.x < -30) d.x = canvas.width + 30;
+  }
+
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
 function drawSky() {
+  const bg = settings.background;
+
+  if (bg === "city_night") {
+    const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    sky.addColorStop(0, "#06122b");
+    sky.addColorStop(1, "#1b1f3a");
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    drawStars();
+    drawClouds(0.5);
+    return;
+  }
+
+  if (bg === "cloudy") {
+    const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    sky.addColorStop(0, "#9fb7c9");
+    sky.addColorStop(1, "#d8e2ea");
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    drawClouds(1.3);
+    return;
+  }
+
+  if (bg === "rainy") {
+    const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    sky.addColorStop(0, "#566a7a");
+    sky.addColorStop(1, "#a7b7c3");
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    drawClouds(1.1);
+    return;
+  }
+
+  // default city_day
   const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
   sky.addColorStop(0, "#87CEEB");
   sky.addColorStop(1, "#cdeffd");
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+  drawClouds(0.8);
+}
+
+function skylineColors() {
+  // returns { c1,c2,c3 } for layers
+  if (settings.background === "city_night") {
+    return { c1: "#0d1433", c2: "#121a44", c3: "#1a2358" };
+  }
+  if (settings.background === "rainy") {
+    return { c1: "#2f3a4a", c2: "#3b475b", c3: "#4a5870" };
+  }
+  if (settings.background === "cloudy") {
+    return { c1: "#3a3f55", c2: "#4a5070", c3: "#59628a" };
+  }
+  return { c1: "#2b2b4f", c2: "#3a3a67", c3: "#4b4b85" }; // day
 }
 
 function drawSkylineLayer(speed, color, baseY, alpha) {
@@ -374,11 +518,18 @@ function drawSkylineLayer(speed, color, baseY, alpha) {
 }
 
 function drawParallaxCity() {
-  drawSkylineLayer(0.25, "#2b2b4f", 420, 0.80);
-  drawSkylineLayer(0.45, "#3a3a67", 360, 0.70);
-  drawSkylineLayer(0.70, "#4b4b85", 300, 0.60);
+  const { c1, c2, c3 } = skylineColors();
+  drawSkylineLayer(0.25, c1, 420, 0.80);
+  drawSkylineLayer(0.45, c2, 360, 0.70);
+  drawSkylineLayer(0.70, c3, 300, 0.60);
+
+  // Rain overlay AFTER skyline for rainy theme
+  if (settings.background === "rainy") drawRain();
 }
 
+// ----------------------------
+// Drawing: buildings/hero/powerups
+// ----------------------------
 function drawBuilding(x, y, width, height) {
   ctx.fillStyle = "#7a0a0a";
   ctx.fillRect(x, y, width, height);
@@ -410,8 +561,10 @@ function drawBuilding(x, y, width, height) {
     }
   }
 
-  // windows
-  ctx.fillStyle = "rgba(255, 234, 120, 0.9)";
+  // windows (brighter at night)
+  const nightBoost = settings.background === "city_night" ? 1.0 : 0.0;
+  ctx.fillStyle = `rgba(255, 234, 120, ${0.55 + nightBoost * 0.35})`;
+
   for (let wy = y + 10; wy < y + height - 10; wy += 46) {
     for (let wx = x + 10; wx < x + width - 12; wx += 22) {
       ctx.fillRect(wx, wy, 8, 12);
@@ -592,7 +745,6 @@ function update() {
       coinsText.textContent = String(coins);
       saveAll();
 
-      // mild difficulty ramp
       if (score % 10 === 0) speedMult = Math.min(1.25, speedMult + 0.05);
     }
   }
@@ -681,6 +833,12 @@ soundToggle.addEventListener("change", () => {
   toastMsg(settings.soundOn ? "Sound ON" : "Sound OFF");
 });
 
+bgSelect.addEventListener("change", () => {
+  settings.background = bgSelect.value;
+  saveAll();
+  toastMsg(`Background: ${bgSelect.options[bgSelect.selectedIndex].text}`);
+});
+
 suitColor.addEventListener("input", () => { cosmetics.suit = suitColor.value; saveAll(); });
 capeColor.addEventListener("input", () => { cosmetics.cape = capeColor.value; saveAll(); });
 maskColor.addEventListener("input", () => { cosmetics.mask = maskColor.value; saveAll(); });
@@ -723,8 +881,14 @@ buyNeon.addEventListener("click", () => {
   const name = ensureName();
   playerNameText.textContent = name;
 
+  // init theme particles once
+  initRain();
+  initStars();
+
   // reflect UI
   soundToggle.checked = !!settings.soundOn;
+  bgSelect.value = settings.background;
+
   suitColor.value = cosmetics.suit;
   capeColor.value = cosmetics.cape;
   maskColor.value = cosmetics.mask;
@@ -734,7 +898,6 @@ buyNeon.addEventListener("click", () => {
 
   renderLocalBoard();
 
-  // show menu at start
   menu.classList.remove("hidden");
   settingsPanel.classList.add("hidden");
   shopPanel.classList.add("hidden");
