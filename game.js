@@ -1,6 +1,6 @@
 // ============================
 // SKY HERO DASH (Local LB only)
-// v9: Weather preview + music preview + SFX packs
+// v10: settings scroll + body/head + hero preview
 // ============================
 
 const canvas = document.getElementById("gameCanvas");
@@ -30,6 +30,9 @@ const bgSelect = document.getElementById("bgSelect");
 const previewCanvas = document.getElementById("previewCanvas");
 const pctx = previewCanvas.getContext("2d");
 
+const heroPreviewCanvas = document.getElementById("heroPreviewCanvas");
+const hctx = heroPreviewCanvas.getContext("2d");
+
 const musicSelect = document.getElementById("musicSelect");
 const musicPlayPreview = document.getElementById("musicPlayPreview");
 const musicStopPreview = document.getElementById("musicStopPreview");
@@ -39,6 +42,9 @@ const sfxTestFlap = document.getElementById("sfxTestFlap");
 const sfxTestScore = document.getElementById("sfxTestScore");
 const sfxTestPower = document.getElementById("sfxTestPower");
 const sfxTestCrash = document.getElementById("sfxTestCrash");
+
+const bodySelect = document.getElementById("bodySelect");
+const headSelect = document.getElementById("headSelect");
 
 const suitColor = document.getElementById("suitColor");
 const capeColor = document.getElementById("capeColor");
@@ -60,8 +66,8 @@ const LS = {
   best: "skyhero_best_v1",
   coins: "skyhero_coins_v1",
   unlocks: "skyhero_unlocks_v1",
-  settings: "skyhero_settings_v3",   // v3 includes background + music + sfx pack
-  cosmetics: "skyhero_cosmetics_v1",
+  settings: "skyhero_settings_v4",   // v4 includes body/head
+  cosmetics: "skyhero_cosmetics_v2", // v2 includes body/head
   localBoard: "skyhero_localboard_v1",
 };
 
@@ -82,15 +88,11 @@ const POWERUP_SIZE = 18;
 const SHIELD_DURATION_MS = 5500;
 const SLOWMO_DURATION_MS = 4500;
 
-// Rain particles
+// Rain/stars particles
 const RAIN_COUNT = 90;
-let rainDrops = [];
-
-// Stars for night
 const STAR_COUNT = 55;
+let rainDrops = [];
 let stars = [];
-
-// Preview particles
 let previewRainDrops = [];
 let previewStars = [];
 
@@ -114,7 +116,15 @@ let settings = {
   sfxPack: "classic",     // classic | heroic | robot
 };
 
-let cosmetics = { suit: "#1f4bff", cape: "#d10000", mask: "#111111", trail: "none" };
+let cosmetics = {
+  suit: "#1f4bff",
+  cape: "#d10000",
+  mask: "#111111",
+  trail: "none",
+  body: "classic",  // classic | armored | speed
+  head: "classic",  // classic | helmet | hood
+};
+
 let unlocks = { spark: false, neon: false };
 let coins = 0;
 
@@ -165,6 +175,12 @@ function loadAll() {
 
   const sfxOK = new Set(["classic", "heroic", "robot"]);
   if (!sfxOK.has(settings.sfxPack)) settings.sfxPack = "classic";
+
+  const bodyOK = new Set(["classic", "armored", "speed"]);
+  if (!bodyOK.has(cosmetics.body)) cosmetics.body = "classic";
+
+  const headOK = new Set(["classic", "helmet", "hood"]);
+  if (!headOK.has(cosmetics.head)) cosmetics.head = "classic";
 }
 
 function getName() {
@@ -239,9 +255,6 @@ let audioCtx = null;
 let musicTimer = null;
 let musicStep = 0;
 
-function audioOn() { return !!settings.soundOn; }
-function musicOn() { return !!settings.soundOn && !!settings.musicOn && settings.music !== "none"; }
-
 function ensureAudio() {
   if (!settings.soundOn && !settings.musicOn) return;
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -255,7 +268,6 @@ function oscNote(freq, durationMs, type, gainVal) {
   o.type = type;
   o.frequency.value = freq;
 
-  // soft envelope (avoid clicks)
   const t0 = audioCtx.currentTime;
   const t1 = t0 + durationMs / 1000;
   g.gain.setValueAtTime(0.0001, t0);
@@ -269,7 +281,6 @@ function oscNote(freq, durationMs, type, gainVal) {
 }
 
 function sfxParams(kind) {
-  // kind: flap|score|power|crash
   const pack = settings.sfxPack;
 
   if (pack === "classic") {
@@ -278,58 +289,31 @@ function sfxParams(kind) {
     if (kind === "power") return { f: 840, d: 110, t: "triangle", g: 0.07 };
     return                { f: 160, d: 180, t: "sawtooth", g: 0.06 };
   }
-
   if (pack === "heroic") {
     if (kind === "flap")  return { f: 520, d: 70,  t: "triangle", g: 0.07 };
     if (kind === "score") return { f: 740, d: 90,  t: "triangle", g: 0.07 };
     if (kind === "power") return { f: 980, d: 140, t: "sine",     g: 0.07 };
     return                { f: 110, d: 220, t: "sawtooth", g: 0.07 };
   }
-
   // robot
-  if (kind === "flap")  return { f: 300, d: 55,  t: "square",   g: 0.06 };
-  if (kind === "score") return { f: 460, d: 75,  t: "square",   g: 0.06 };
-  if (kind === "power") return { f: 620, d: 120, t: "square",   g: 0.06 };
-  return                { f: 90,  d: 240, t: "square",   g: 0.06 };
+  if (kind === "flap")  return { f: 300, d: 55,  t: "square", g: 0.06 };
+  if (kind === "score") return { f: 460, d: 75,  t: "square", g: 0.06 };
+  if (kind === "power") return { f: 620, d: 120, t: "square", g: 0.06 };
+  return                { f: 90,  d: 240, t: "square", g: 0.06 };
 }
 
 function playSfx(kind) {
-  if (!audioOn()) return;
+  if (!settings.soundOn) return;
   ensureAudio();
   if (!audioCtx) return;
   const p = sfxParams(kind);
   oscNote(p.f, p.d, p.t, p.g);
 }
 
-// Music patterns (very lightweight)
 const MUSIC = {
-  chill:  {
-    bpm: 92,
-    steps: [
-      [220, 440], [247, 494], [262, 523], [247, 494],
-      [196, 392], [220, 440], [247, 494], [220, 440],
-    ],
-    type: "sine",
-    gain: 0.025
-  },
-  arcade: {
-    bpm: 120,
-    steps: [
-      [330], [392], [440], [392],
-      [523], [392], [440], [392],
-    ],
-    type: "square",
-    gain: 0.018
-  },
-  night: {
-    bpm: 98,
-    steps: [
-      [185, 370], [207, 414], [233, 466], [207, 414],
-      [155, 311], [185, 370], [207, 414], [185, 370],
-    ],
-    type: "triangle",
-    gain: 0.022
-  }
+  chill:  { bpm: 92,  steps: [[220,440],[247,494],[262,523],[247,494],[196,392],[220,440],[247,494],[220,440]], type:"sine",     gain:0.025 },
+  arcade: { bpm: 120, steps: [[330],[392],[440],[392],[523],[392],[440],[392]],                         type:"square",   gain:0.018 },
+  night:  { bpm: 98,  steps: [[185,370],[207,414],[233,466],[207,414],[155,311],[185,370],[207,414],[185,370]], type:"triangle", gain:0.022 }
 };
 
 function stopMusic() {
@@ -338,21 +322,25 @@ function stopMusic() {
   musicStep = 0;
 }
 
-function startMusicPreview(force = false) {
-  // force = true means play even if menu closed; we keep it simple
+function canPlayMusicInGame() {
+  return menu.classList.contains("hidden")
+    && settings.soundOn
+    && settings.musicOn
+    && settings.music !== "none";
+}
+
+function startMusicLoop(force = false) {
   stopMusic();
-  if (!audioCtx) ensureAudio();
+  ensureAudio();
   if (!audioCtx) return;
 
   const key = settings.music;
   if (key === "none") return;
-
   const m = MUSIC[key];
-  const stepMs = Math.round((60_000 / m.bpm) / 2); // 8th-notes
-  musicTimer = setInterval(() => {
-    // only run if music enabled (unless force)
-    if (!force && !musicOn()) return;
 
+  const stepMs = Math.round((60_000 / m.bpm) / 2);
+  musicTimer = setInterval(() => {
+    if (!force && !canPlayMusicInGame()) return;
     const chord = m.steps[musicStep % m.steps.length];
     for (const f of chord) oscNote(f, Math.max(90, stepMs - 10), m.type, m.gain);
     musicStep++;
@@ -360,11 +348,9 @@ function startMusicPreview(force = false) {
 }
 
 function ensureMusicState() {
-  // game music runs whenever: menu hidden AND musicOn()
-  if (menu.classList.contains("hidden") && musicOn()) {
-    if (!musicTimer) startMusicPreview(false);
+  if (canPlayMusicInGame()) {
+    if (!musicTimer) startMusicLoop(false);
   } else {
-    // stop music if menu open or disabled
     stopMusic();
   }
 }
@@ -375,24 +361,13 @@ function ensureMusicState() {
 function initRain(targetArray, w, h) {
   targetArray.length = 0;
   for (let i = 0; i < RAIN_COUNT; i++) {
-    targetArray.push({
-      x: Math.random() * w,
-      y: Math.random() * h,
-      vy: 6 + Math.random() * 7,
-      len: 10 + Math.random() * 14,
-    });
+    targetArray.push({ x: Math.random()*w, y: Math.random()*h, vy: 6+Math.random()*7, len: 10+Math.random()*14 });
   }
 }
-
 function initStars(targetArray, w, h) {
   targetArray.length = 0;
   for (let i = 0; i < STAR_COUNT; i++) {
-    targetArray.push({
-      x: Math.random() * w,
-      y: Math.random() * (h * 0.65),
-      r: 0.6 + Math.random() * 1.4,
-      tw: Math.random() * Math.PI * 2,
-    });
+    targetArray.push({ x: Math.random()*w, y: Math.random()*(h*0.65), r: 0.6+Math.random()*1.4, tw: Math.random()*Math.PI*2 });
   }
 }
 
@@ -457,13 +432,11 @@ function endGame() {
     bestText.textContent = String(best);
   }
 
-  // coins reward per run
   coins += Math.min(60, Math.floor(score * 2));
   coinsText.textContent = String(coins);
   saveAll();
 
   submitLocalScore(name, score);
-
   menu.classList.remove("hidden");
 }
 
@@ -480,7 +453,7 @@ function spawnBuildingPair() {
   if (Math.random() < POWERUP_CHANCE) {
     const types = ["shield", "slow"];
     const t = types[Math.floor(Math.random() * types.length)];
-    power = { type: t, x: canvas.width + 10 + BUILDING_WIDTH / 2, y: top + GAP_SIZE / 2, taken: false };
+    power = { type: t, x: canvas.width + 10 + BUILDING_WIDTH/2, y: top + GAP_SIZE/2, taken: false };
   }
 
   buildings.push({ x: canvas.width + 10, top, passed: false, power });
@@ -494,16 +467,10 @@ function buildingSpeed() {
 }
 
 function applyPower(type) {
-  if (type === "shield") {
-    shieldUntil = now() + SHIELD_DURATION_MS;
-    toastMsg("Shield ON!");
-  } else if (type === "slow") {
-    slowmoUntil = now() + SLOWMO_DURATION_MS;
-    toastMsg("Slow-mo!");
-  }
-  ensureAudio();
-  playSfx("power");
+  if (type === "shield") { shieldUntil = now() + SHIELD_DURATION_MS; toastMsg("Shield ON!"); }
+  else if (type === "slow") { slowmoUntil = now() + SLOWMO_DURATION_MS; toastMsg("Slow-mo!"); }
 
+  playSfx("power");
   coins += 5;
   coinsText.textContent = String(coins);
   saveAll();
@@ -514,24 +481,22 @@ function heroHitBuilding(gapTop, gapBottom, bX, bRight) {
   const heroBottom = hero.y + hero.h;
   const xOverlap = heroRight > bX && hero.x < bRight;
   if (!xOverlap) return false;
-  const hitTop = hero.y < gapTop;
-  const hitBottom = heroBottom > gapBottom;
-  return hitTop || hitBottom;
+  return (hero.y < gapTop) || (heroBottom > gapBottom);
 }
 
 // ----------------------------
-// Drawing helpers (shared by game + preview)
+// Background renderer (shared)
 // ----------------------------
-function drawClouds(ctx2, f, w, h, strength = 1) {
+function drawClouds(ctx2, f, w, h, strength=1) {
   ctx2.globalAlpha = 0.18 * strength;
   ctx2.fillStyle = "#ffffff";
   for (let i = 0; i < 6; i++) {
     const cx = (i * 120 + (f * 0.5)) % (w + 160) - 80;
     const cy = 28 + (i % 3) * 26;
     ctx2.beginPath();
-    ctx2.arc(cx, cy, 16, 0, Math.PI * 2);
-    ctx2.arc(cx + 18, cy + 5, 13, 0, Math.PI * 2);
-    ctx2.arc(cx - 18, cy + 6, 12, 0, Math.PI * 2);
+    ctx2.arc(cx, cy, 16, 0, Math.PI*2);
+    ctx2.arc(cx + 18, cy + 5, 13, 0, Math.PI*2);
+    ctx2.arc(cx - 18, cy + 6, 12, 0, Math.PI*2);
     ctx2.fill();
   }
   ctx2.globalAlpha = 1;
@@ -544,7 +509,7 @@ function drawStars(ctx2, f, starArr) {
     const tw = 0.55 + 0.45 * Math.sin(f * 0.03 + s.tw);
     ctx2.globalAlpha = 0.25 + 0.55 * tw;
     ctx2.beginPath();
-    ctx2.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx2.arc(s.x, s.y, s.r, 0, Math.PI*2);
     ctx2.fill();
   }
   ctx2.restore();
@@ -556,32 +521,25 @@ function drawRain(ctx2, dropArr, w, h) {
   ctx2.globalAlpha = 0.35;
   ctx2.strokeStyle = "#d7f3ff";
   ctx2.lineWidth = 1;
-
   for (const d of dropArr) {
     ctx2.beginPath();
     ctx2.moveTo(d.x, d.y);
     ctx2.lineTo(d.x - 2, d.y + d.len);
     ctx2.stroke();
-
     d.y += d.vy;
     d.x -= 0.7;
-
-    if (d.y > h + 20) {
-      d.y = -20;
-      d.x = Math.random() * w;
-    }
+    if (d.y > h + 20) { d.y = -20; d.x = Math.random() * w; }
     if (d.x < -30) d.x = w + 30;
   }
-
   ctx2.restore();
   ctx2.globalAlpha = 1;
 }
 
 function skylineColors(bg) {
-  if (bg === "city_night") return { c1: "#0d1433", c2: "#121a44", c3: "#1a2358" };
-  if (bg === "rainy")      return { c1: "#2f3a4a", c2: "#3b475b", c3: "#4a5870" };
-  if (bg === "cloudy")     return { c1: "#3a3f55", c2: "#4a5070", c3: "#59628a" };
-  return { c1: "#2b2b4f", c2: "#3a3a67", c3: "#4b4b85" };
+  if (bg === "city_night") return { c1:"#0d1433", c2:"#121a44", c3:"#1a2358" };
+  if (bg === "rainy")      return { c1:"#2f3a4a", c2:"#3b475b", c3:"#4a5870" };
+  if (bg === "cloudy")     return { c1:"#3a3f55", c2:"#4a5070", c3:"#59628a" };
+  return { c1:"#2b2b4f", c2:"#3a3a67", c3:"#4b4b85" };
 }
 
 function drawSkylineLayer(ctx2, f, w, color, baseY, alpha, speed) {
@@ -598,37 +556,36 @@ function drawSkylineLayer(ctx2, f, w, color, baseY, alpha, speed) {
 
 function drawBackground(ctx2, f, w, h, bg, starArr, rainArr) {
   if (bg === "city_night") {
-    const sky = ctx2.createLinearGradient(0, 0, 0, h);
-    sky.addColorStop(0, "#06122b");
-    sky.addColorStop(1, "#1b1f3a");
+    const sky = ctx2.createLinearGradient(0,0,0,h);
+    sky.addColorStop(0,"#06122b");
+    sky.addColorStop(1,"#1b1f3a");
     ctx2.fillStyle = sky;
-    ctx2.fillRect(0, 0, w, h);
+    ctx2.fillRect(0,0,w,h);
     drawStars(ctx2, f, starArr);
     drawClouds(ctx2, f, w, h, 0.5);
   } else if (bg === "cloudy") {
-    const sky = ctx2.createLinearGradient(0, 0, 0, h);
-    sky.addColorStop(0, "#9fb7c9");
-    sky.addColorStop(1, "#d8e2ea");
+    const sky = ctx2.createLinearGradient(0,0,0,h);
+    sky.addColorStop(0,"#9fb7c9");
+    sky.addColorStop(1,"#d8e2ea");
     ctx2.fillStyle = sky;
-    ctx2.fillRect(0, 0, w, h);
+    ctx2.fillRect(0,0,w,h);
     drawClouds(ctx2, f, w, h, 1.3);
   } else if (bg === "rainy") {
-    const sky = ctx2.createLinearGradient(0, 0, 0, h);
-    sky.addColorStop(0, "#566a7a");
-    sky.addColorStop(1, "#a7b7c3");
+    const sky = ctx2.createLinearGradient(0,0,0,h);
+    sky.addColorStop(0,"#566a7a");
+    sky.addColorStop(1,"#a7b7c3");
     ctx2.fillStyle = sky;
-    ctx2.fillRect(0, 0, w, h);
+    ctx2.fillRect(0,0,w,h);
     drawClouds(ctx2, f, w, h, 1.1);
   } else {
-    const sky = ctx2.createLinearGradient(0, 0, 0, h);
-    sky.addColorStop(0, "#87CEEB");
-    sky.addColorStop(1, "#cdeffd");
+    const sky = ctx2.createLinearGradient(0,0,0,h);
+    sky.addColorStop(0,"#87CEEB");
+    sky.addColorStop(1,"#cdeffd");
     ctx2.fillStyle = sky;
-    ctx2.fillRect(0, 0, w, h);
+    ctx2.fillRect(0,0,w,h);
     drawClouds(ctx2, f, w, h, 0.8);
   }
 
-  // Parallax skyline for all city-ish themes (including rainy/night)
   const { c1, c2, c3 } = skylineColors(bg);
   drawSkylineLayer(ctx2, f, w, c1, h - 10, 0.85, 0.25);
   drawSkylineLayer(ctx2, f, w, c2, h - 28, 0.75, 0.45);
@@ -689,7 +646,7 @@ function drawPowerup(p) {
     : "rgba(180, 255, 90, 0.9)";
 
   ctx.beginPath();
-  ctx.arc(0, 0, POWERUP_SIZE, 0, Math.PI * 2);
+  ctx.arc(0, 0, POWERUP_SIZE, 0, Math.PI*2);
   ctx.fill();
 
   ctx.fillStyle = "#000";
@@ -701,83 +658,160 @@ function drawPowerup(p) {
   ctx.restore();
 }
 
-function drawTrail() {
-  if (cosmetics.trail === "none") return;
+function drawTrail(ctx2, f, hx, hy, trail) {
+  if (trail === "none") return;
 
-  const x = hero.x - 6;
-  const y = hero.y + 18;
+  const x = hx - 6;
+  const y = hy + 18;
 
-  if (cosmetics.trail === "spark") {
-    ctx.globalAlpha = 0.65;
+  if (trail === "spark") {
+    ctx2.globalAlpha = 0.65;
     for (let i = 0; i < 4; i++) {
-      ctx.fillStyle = `rgba(255, 200, 40, ${0.25 + i * 0.12})`;
-      ctx.beginPath();
-      ctx.arc(x - i * 10, y + Math.sin((frame + i) * 0.6) * 3, 4 - i * 0.7, 0, Math.PI * 2);
-      ctx.fill();
+      ctx2.fillStyle = `rgba(255, 200, 40, ${0.25 + i * 0.12})`;
+      ctx2.beginPath();
+      ctx2.arc(x - i * 10, y + Math.sin((f + i) * 0.6) * 3, 4 - i * 0.7, 0, Math.PI*2);
+      ctx2.fill();
     }
-    ctx.globalAlpha = 1;
+    ctx2.globalAlpha = 1;
   }
 
-  if (cosmetics.trail === "neon") {
-    ctx.globalAlpha = 0.55;
+  if (trail === "neon") {
+    ctx2.globalAlpha = 0.55;
     for (let i = 0; i < 5; i++) {
-      ctx.strokeStyle = `rgba(0, 255, 230, ${0.25 + i * 0.1})`;
-      ctx.lineWidth = 3 - i * 0.4;
-      ctx.beginPath();
-      ctx.moveTo(x - i * 10, y);
-      ctx.lineTo(x - i * 10 - 8, y + Math.sin((frame + i) * 0.7) * 6);
-      ctx.stroke();
+      ctx2.strokeStyle = `rgba(0, 255, 230, ${0.25 + i * 0.1})`;
+      ctx2.lineWidth = 3 - i * 0.4;
+      ctx2.beginPath();
+      ctx2.moveTo(x - i * 10, y);
+      ctx2.lineTo(x - i * 10 - 8, y + Math.sin((f + i) * 0.7) * 6);
+      ctx2.stroke();
     }
-    ctx.globalAlpha = 1;
+    ctx2.globalAlpha = 1;
   }
 }
 
-function drawHero() {
-  const x = hero.x;
-  const y = hero.y;
+function drawHeroVariant(ctx2, f, hx, hy, opts) {
+  const { suit, cape, mask, body, head, trail, shielded } = opts;
 
-  if (now() < shieldUntil) {
-    ctx.globalAlpha = 0.22;
-    ctx.fillStyle = "#00aaff";
-    ctx.beginPath();
-    ctx.arc(x + 17, y + 17, 30, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1;
+  if (shielded) {
+    ctx2.globalAlpha = 0.22;
+    ctx2.fillStyle = "#00aaff";
+    ctx2.beginPath();
+    ctx2.arc(hx + 17, hy + 17, 30, 0, Math.PI*2);
+    ctx2.fill();
+    ctx2.globalAlpha = 1;
   }
 
-  drawTrail();
+  drawTrail(ctx2, f, hx, hy, trail);
 
-  const flutter = Math.sin(frame * 0.2) * 4;
-  ctx.fillStyle = cosmetics.cape;
-  ctx.beginPath();
-  ctx.moveTo(x + 6, y + 18);
-  ctx.lineTo(x - 18, y + 24 + flutter);
-  ctx.lineTo(x + 2, y + 36);
-  ctx.closePath();
-  ctx.fill();
+  // cape
+  const flutter = Math.sin(f * 0.2) * 4;
+  ctx2.fillStyle = cape;
+  ctx2.beginPath();
+  ctx2.moveTo(hx + 6, hy + 18);
+  ctx2.lineTo(hx - 18, hy + 24 + flutter);
+  ctx2.lineTo(hx + 2, hy + 36);
+  ctx2.closePath();
+  ctx2.fill();
 
-  ctx.fillStyle = cosmetics.suit;
-  ctx.fillRect(x, y + 10, 34, 24);
+  // body variants
+  if (body === "armored") {
+    ctx2.fillStyle = suit;
+    ctx2.fillRect(hx, hy + 10, 34, 24);
+    ctx2.globalAlpha = 0.25;
+    ctx2.fillStyle = "#000";
+    ctx2.fillRect(hx + 2, hy + 12, 30, 4);
+    ctx2.fillRect(hx + 2, hy + 18, 30, 4);
+    ctx2.fillRect(hx + 2, hy + 24, 30, 4);
+    ctx2.globalAlpha = 1;
+    // shoulder plates
+    ctx2.globalAlpha = 0.18;
+    ctx2.fillStyle = "#000";
+    ctx2.fillRect(hx - 2, hy + 12, 6, 10);
+    ctx2.fillRect(hx + 30, hy + 12, 6, 10);
+    ctx2.globalAlpha = 1;
+  } else if (body === "speed") {
+    ctx2.fillStyle = suit;
+    ctx2.beginPath();
+    ctx2.roundRect(hx, hy + 10, 34, 24, 8);
+    ctx2.fill();
+    // stripes
+    ctx2.globalAlpha = 0.22;
+    ctx2.fillStyle = "#fff";
+    ctx2.fillRect(hx + 6, hy + 12, 4, 20);
+    ctx2.fillRect(hx + 16, hy + 12, 3, 20);
+    ctx2.globalAlpha = 1;
+  } else {
+    ctx2.fillStyle = suit;
+    ctx2.fillRect(hx, hy + 10, 34, 24);
+  }
 
-  ctx.fillStyle = "#ffd400";
-  ctx.fillRect(x + 6, y + 26, 22, 4);
+  // belt
+  ctx2.fillStyle = "#ffd400";
+  ctx2.fillRect(hx + 6, hy + 26, 22, 4);
 
-  ctx.fillStyle = "#ffcc99";
-  ctx.beginPath();
-  ctx.arc(x + 17, y + 6, 10, 0, Math.PI * 2);
-  ctx.fill();
+  // head variants
+  if (head === "helmet") {
+    // helmet dome
+    ctx2.fillStyle = "#c7c7c7";
+    ctx2.beginPath();
+    ctx2.arc(hx + 17, hy + 6, 11, Math.PI, 0);
+    ctx2.lineTo(hx + 28, hy + 10);
+    ctx2.lineTo(hx + 6, hy + 10);
+    ctx2.closePath();
+    ctx2.fill();
+    // visor
+    ctx2.fillStyle = mask;
+    ctx2.fillRect(hx + 7, hy + 4, 20, 6);
+    ctx2.globalAlpha = 0.25;
+    ctx2.fillStyle = "#fff";
+    ctx2.fillRect(hx + 9, hy + 5, 16, 2);
+    ctx2.globalAlpha = 1;
+  } else if (head === "hood") {
+    // hood shape
+    ctx2.fillStyle = "#2b2b2b";
+    ctx2.beginPath();
+    ctx2.arc(hx + 17, hy + 7, 12, 0, Math.PI*2);
+    ctx2.fill();
+    // face
+    ctx2.fillStyle = "#ffcc99";
+    ctx2.beginPath();
+    ctx2.arc(hx + 17, hy + 8, 8, 0, Math.PI*2);
+    ctx2.fill();
+    // mask strip
+    ctx2.fillStyle = mask;
+    ctx2.fillRect(hx + 9, hy + 6, 16, 5);
+  } else {
+    // classic head
+    ctx2.fillStyle = "#ffcc99";
+    ctx2.beginPath();
+    ctx2.arc(hx + 17, hy + 6, 10, 0, Math.PI*2);
+    ctx2.fill();
+    ctx2.fillStyle = mask;
+    ctx2.fillRect(hx + 7, hy + 2, 20, 6);
+  }
 
-  ctx.fillStyle = cosmetics.mask;
-  ctx.fillRect(x + 7, y + 2, 20, 6);
+  // eyes
+  ctx2.fillStyle = "#fff";
+  ctx2.fillRect(hx + 10, hy + 6, 6, 2);
+  ctx2.fillRect(hx + 19, hy + 6, 6, 2);
 
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(x + 10, y + 4, 6, 2);
-  ctx.fillRect(x + 19, y + 4, 6, 2);
+  // emblem
+  ctx2.fillStyle = "#fff";
+  ctx2.beginPath();
+  ctx2.arc(hx + 17, hy + 20, 4, 0, Math.PI*2);
+  ctx2.fill();
+}
 
-  ctx.fillStyle = "#fff";
-  ctx.beginPath();
-  ctx.arc(x + 17, y + 20, 4, 0, Math.PI * 2);
-  ctx.fill();
+function drawHero() {
+  drawHeroVariant(ctx, frame, hero.x, hero.y, {
+    suit: cosmetics.suit,
+    cape: cosmetics.cape,
+    mask: cosmetics.mask,
+    body: cosmetics.body,
+    head: cosmetics.head,
+    trail: cosmetics.trail,
+    shielded: now() < shieldUntil,
+  });
 }
 
 // ----------------------------
@@ -803,9 +837,9 @@ function update() {
     const right = b.x + BUILDING_WIDTH;
 
     if (b.power && !b.power.taken) {
-      b.power.x = b.x + BUILDING_WIDTH / 2;
-      const dx = (hero.x + hero.w / 2) - b.power.x;
-      const dy = (hero.y + hero.h / 2) - b.power.y;
+      b.power.x = b.x + BUILDING_WIDTH/2;
+      const dx = (hero.x + hero.w/2) - b.power.x;
+      const dy = (hero.y + hero.h/2) - b.power.y;
       if (Math.hypot(dx, dy) < POWERUP_SIZE + 12) {
         b.power.taken = true;
         applyPower(b.power.type);
@@ -842,7 +876,7 @@ function update() {
 }
 
 function draw() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
   drawBackground(ctx, frame, canvas.width, canvas.height, settings.background, stars, rainDrops);
 
   for (const b of buildings) {
@@ -862,21 +896,56 @@ function draw() {
 }
 
 function drawPreview() {
-  const w = previewCanvas.width;
-  const h = previewCanvas.height;
-  pctx.clearRect(0, 0, w, h);
-
-  // use same bg renderer, but with preview arrays
-  drawBackground(pctx, frame, w, h, settings.background, previewStars, previewRainDrops);
-
-  // add a tiny label
+  drawBackground(pctx, frame, previewCanvas.width, previewCanvas.height, settings.background, previewStars, previewRainDrops);
   pctx.globalAlpha = 0.9;
   pctx.fillStyle = "rgba(0,0,0,0.55)";
-  pctx.fillRect(8, 8, 130, 22);
+  pctx.fillRect(8, 8, 160, 22);
   pctx.fillStyle = "#fff";
   pctx.font = "12px Arial";
   pctx.fillText("Preview: " + settings.background, 14, 23);
   pctx.globalAlpha = 1;
+}
+
+function drawHeroPreview() {
+  const w = heroPreviewCanvas.width;
+  const h = heroPreviewCanvas.height;
+  hctx.clearRect(0,0,w,h);
+
+  // simple neutral background for hero preview
+  const g = hctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0, "rgba(255,255,255,0.95)");
+  g.addColorStop(1, "rgba(230,240,255,0.95)");
+  hctx.fillStyle = g;
+  hctx.fillRect(0,0,w,h);
+
+  // ground line
+  hctx.globalAlpha = 0.22;
+  hctx.fillStyle = "#000";
+  hctx.fillRect(0, h-30, w, 2);
+  hctx.globalAlpha = 1;
+
+  // draw a larger hero centered
+  const hx = Math.floor(w/2 - 17);
+  const hy = Math.floor(h/2 - 20);
+
+  drawHeroVariant(hctx, frame, hx, hy, {
+    suit: cosmetics.suit,
+    cape: cosmetics.cape,
+    mask: cosmetics.mask,
+    body: cosmetics.body,
+    head: cosmetics.head,
+    trail: cosmetics.trail,
+    shielded: false,
+  });
+
+  // label
+  hctx.globalAlpha = 0.9;
+  hctx.fillStyle = "rgba(0,0,0,0.55)";
+  hctx.fillRect(8, 8, 140, 22);
+  hctx.fillStyle = "#fff";
+  hctx.font = "12px Arial";
+  hctx.fillText("Hero Preview", 14, 23);
+  hctx.globalAlpha = 1;
 }
 
 function loop() {
@@ -884,6 +953,7 @@ function loop() {
   update();
   draw();
   drawPreview();
+  drawHeroPreview();
   ensureMusicState();
   animationId = requestAnimationFrame(loop);
 }
@@ -933,16 +1003,12 @@ closeSettings.addEventListener("click", () => {
 shopButton.addEventListener("click", () => shopPanel.classList.toggle("hidden"));
 changeNameButton.addEventListener("click", () => promptName());
 
-// Settings inputs
+// toggles + selects
 soundToggle.addEventListener("change", () => {
   settings.soundOn = !!soundToggle.checked;
   saveAll();
-  if (!settings.soundOn) {
-    stopMusic();
-    toastMsg("Sound OFF");
-  } else {
-    toastMsg("Sound ON");
-  }
+  if (!settings.soundOn) { stopMusic(); toastMsg("Sound OFF"); }
+  else toastMsg("Sound ON");
 });
 
 musicToggle.addEventListener("change", () => {
@@ -967,9 +1033,8 @@ musicSelect.addEventListener("change", () => {
 
 musicPlayPreview.addEventListener("click", () => {
   ensureAudio();
-  if (!audioCtx) return toastMsg("Tap the canvas once to enable audio.");
-  // force preview even if menu open
-  startMusicPreview(true);
+  if (!audioCtx) return toastMsg("Tap the game canvas once to enable audio.");
+  startMusicLoop(true);
   toastMsg("Music preview playing");
 });
 
@@ -989,6 +1054,10 @@ sfxTestScore.addEventListener("click", () => { ensureAudio(); playSfx("score"); 
 sfxTestPower.addEventListener("click", () => { ensureAudio(); playSfx("power"); });
 sfxTestCrash.addEventListener("click", () => { ensureAudio(); playSfx("crash"); });
 
+// cosmetics
+bodySelect.addEventListener("change", () => { cosmetics.body = bodySelect.value; saveAll(); toastMsg("Body updated"); });
+headSelect.addEventListener("change", () => { cosmetics.head = headSelect.value; saveAll(); toastMsg("Head updated"); });
+
 suitColor.addEventListener("input", () => { cosmetics.suit = suitColor.value; saveAll(); });
 capeColor.addEventListener("input", () => { cosmetics.cape = capeColor.value; saveAll(); });
 maskColor.addEventListener("input", () => { cosmetics.mask = maskColor.value; saveAll(); });
@@ -1001,7 +1070,7 @@ trailSelect.addEventListener("change", () => {
   saveAll();
 });
 
-// Shop
+// shop
 buySpark.addEventListener("click", () => {
   if (unlocks.spark) return toastMsg("Spark already unlocked.");
   if (coins < 50) return toastMsg("Need 50 coins.");
@@ -1031,7 +1100,6 @@ buyNeon.addEventListener("click", () => {
   const name = ensureName();
   playerNameText.textContent = name;
 
-  // init particles for game + preview
   initRain(rainDrops, canvas.width, canvas.height);
   initStars(stars, canvas.width, canvas.height);
   initRain(previewRainDrops, previewCanvas.width, previewCanvas.height);
@@ -1040,10 +1108,12 @@ buyNeon.addEventListener("click", () => {
   // reflect UI
   soundToggle.checked = !!settings.soundOn;
   musicToggle.checked = !!settings.musicOn;
-
   bgSelect.value = settings.background;
   musicSelect.value = settings.music;
   sfxSelect.value = settings.sfxPack;
+
+  bodySelect.value = cosmetics.body;
+  headSelect.value = cosmetics.head;
 
   suitColor.value = cosmetics.suit;
   capeColor.value = cosmetics.cape;
@@ -1051,7 +1121,6 @@ buyNeon.addEventListener("click", () => {
   trailSelect.value = cosmetics.trail;
 
   coinsText.textContent = String(coins);
-
   renderLocalBoard();
 
   menu.classList.remove("hidden");

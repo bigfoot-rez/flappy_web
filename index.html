@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Sky Hero Dash</title>
-  <link rel="stylesheet" href="style.css?v=9" />
+  <link rel="stylesheet" href="style.css?v=10" />
 </head>
 <body>
   <div id="app">
@@ -29,7 +29,8 @@
           <button id="settingsButton" class="btn big secondary">Settings</button>
         </div>
 
-        <div id="settingsPanel" class="panel hidden">
+        <!-- SETTINGS (SCROLLABLE) -->
+        <div id="settingsPanel" class="panel hidden scrollPanel">
           <div class="panelTitle">Settings</div>
 
           <div class="row2">
@@ -45,7 +46,6 @@
           </div>
 
           <div class="panelTitle">Weather / Background</div>
-
           <div class="grid">
             <div class="field" style="grid-column: 1 / -1;">
               <div class="label">Theme</div>
@@ -60,7 +60,7 @@
             <div class="field" style="grid-column: 1 / -1;">
               <div class="label">Preview</div>
               <canvas id="previewCanvas" width="320" height="160"></canvas>
-              <div class="hint">This is a live preview. Rain and stars show up here too.</div>
+              <div class="hint">Live preview (rain + stars included).</div>
             </div>
           </div>
 
@@ -82,7 +82,7 @@
                 <button id="musicPlayPreview" class="btn small">Play Preview</button>
                 <button id="musicStopPreview" class="btn small secondary">Stop</button>
               </div>
-              <div class="hint">Music is generated (no audio files). On phones, audio starts after a tap.</div>
+              <div class="hint">On phones, audio starts after a tap.</div>
             </div>
           </div>
 
@@ -105,19 +105,47 @@
           </div>
 
           <div class="panelTitle">Customize Hero</div>
+
           <div class="grid">
+            <div class="field" style="grid-column: 1 / -1;">
+              <div class="label">Hero Preview</div>
+              <canvas id="heroPreviewCanvas" width="320" height="160"></canvas>
+              <div class="hint">Changes update instantly.</div>
+            </div>
+
+            <div class="field">
+              <div class="label">Body</div>
+              <select id="bodySelect">
+                <option value="classic">Classic</option>
+                <option value="armored">Armored</option>
+                <option value="speed">Speed Suit</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <div class="label">Head</div>
+              <select id="headSelect">
+                <option value="classic">Classic</option>
+                <option value="helmet">Helmet</option>
+                <option value="hood">Hood</option>
+              </select>
+            </div>
+
             <div class="field">
               <div class="label">Suit</div>
               <input id="suitColor" type="color" value="#1f4bff" />
             </div>
+
             <div class="field">
               <div class="label">Cape</div>
               <input id="capeColor" type="color" value="#d10000" />
             </div>
+
             <div class="field">
               <div class="label">Mask</div>
               <input id="maskColor" type="color" value="#111111" />
             </div>
+
             <div class="field">
               <div class="label">Trail</div>
               <select id="trailSelect">
@@ -136,29 +164,4 @@
           <div id="shopPanel" class="panel subtle hidden">
             <div class="panelTitle">Unlockables</div>
             <div class="shopList">
-              <button id="buySpark" class="btn small">Buy Spark Trail (50)</button>
-              <button id="buyNeon" class="btn small">Buy Neon Trail (120)</button>
-            </div>
-            <div class="hint">Earn coins by passing buildings (+1) and grabbing power-ups (+5).</div>
-          </div>
-
-          <div class="menuRow">
-            <button id="changeNameButton" class="btn secondary">Change name</button>
-            <button id="closeSettings" class="btn secondary">Close</button>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panelTitle">Top 5 (This device)</div>
-          <ol id="localLeaderboard"></ol>
-          <div class="hint">Saved on each phone/browser only.</div>
-        </div>
-      </div>
-    </div>
-
-    <div id="toast" class="toast hidden"></div>
-  </div>
-
-  <script src="game.js?v=9"></script>
-</body>
-</html>
+              <button id

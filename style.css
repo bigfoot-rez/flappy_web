@@ -57,7 +57,7 @@ canvas{
   height: auto;
 }
 
-#previewCanvas{
+#previewCanvas, #heroPreviewCanvas{
   width: 100%;
   height: auto;
   border-radius: 12px;
@@ -71,10 +71,15 @@ canvas{
   display: grid;
   place-items: center;
   background: rgba(0,0,0,0.35);
+
+  /* allow scrolling on small phones */
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 14px 0;
 }
 
 .menuCard{
-  width: min(440px, 92vw);
+  width: min(460px, 92vw);
   background: rgba(255,255,255,0.92);
   border: 3px solid #000;
   border-radius: 16px;
@@ -191,4 +196,12 @@ canvas{
   font-weight: 900;
   max-width: min(520px, 92vw);
   text-align: center;
+  z-index: 9999;
+}
+
+/* Optional: makes the settings panel itself scroll if it grows huge */
+.scrollPanel{
+  max-height: min(72vh, 620px);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
 }
