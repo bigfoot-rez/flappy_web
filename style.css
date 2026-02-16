@@ -57,6 +57,14 @@ canvas{
   height: auto;
 }
 
+#previewCanvas{
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+  border: 2px solid #000;
+  background: #fff;
+}
+
 .menu{
   position: fixed;
   inset: 0;
@@ -66,7 +74,7 @@ canvas{
 }
 
 .menuCard{
-  width: min(420px, 92vw);
+  width: min(440px, 92vw);
   background: rgba(255,255,255,0.92);
   border: 3px solid #000;
   border-radius: 16px;
@@ -141,6 +149,13 @@ canvas{
   align-items: center;
   gap: 10px;
   font-weight: 900;
+}
+
+.row2{
+  display:flex;
+  gap:16px;
+  flex-wrap:wrap;
+  align-items:center;
   margin-bottom: 10px;
 }
 
@@ -156,6 +171,12 @@ canvas{
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.buttonRow{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
 }
 
 .toast{

@@ -1,6 +1,6 @@
 // ============================
 // SKY HERO DASH (Local LB only)
-// Background themes v8
+// v9: Weather preview + music preview + SFX packs
 // ============================
 
 const canvas = document.getElementById("gameCanvas");
@@ -24,7 +24,21 @@ const shopPanel = document.getElementById("shopPanel");
 const changeNameButton = document.getElementById("changeNameButton");
 
 const soundToggle = document.getElementById("soundToggle");
+const musicToggle = document.getElementById("musicToggle");
 const bgSelect = document.getElementById("bgSelect");
+
+const previewCanvas = document.getElementById("previewCanvas");
+const pctx = previewCanvas.getContext("2d");
+
+const musicSelect = document.getElementById("musicSelect");
+const musicPlayPreview = document.getElementById("musicPlayPreview");
+const musicStopPreview = document.getElementById("musicStopPreview");
+
+const sfxSelect = document.getElementById("sfxSelect");
+const sfxTestFlap = document.getElementById("sfxTestFlap");
+const sfxTestScore = document.getElementById("sfxTestScore");
+const sfxTestPower = document.getElementById("sfxTestPower");
+const sfxTestCrash = document.getElementById("sfxTestCrash");
 
 const suitColor = document.getElementById("suitColor");
 const capeColor = document.getElementById("capeColor");
@@ -46,7 +60,7 @@ const LS = {
   best: "skyhero_best_v1",
   coins: "skyhero_coins_v1",
   unlocks: "skyhero_unlocks_v1",
-  settings: "skyhero_settings_v2",   // bumped because we added background theme
+  settings: "skyhero_settings_v3",   // v3 includes background + music + sfx pack
   cosmetics: "skyhero_cosmetics_v1",
   localBoard: "skyhero_localboard_v1",
 };
@@ -76,6 +90,10 @@ let rainDrops = [];
 const STAR_COUNT = 55;
 let stars = [];
 
+// Preview particles
+let previewRainDrops = [];
+let previewStars = [];
+
 // ----------------------------
 // State
 // ----------------------------
@@ -90,8 +108,12 @@ let slowmoUntil = 0;
 // Settings + cosmetics + unlocks
 let settings = {
   soundOn: true,
+  musicOn: true,
   background: "city_day", // city_day | city_night | cloudy | rainy
+  music: "chill",         // none | chill | arcade | night
+  sfxPack: "classic",     // classic | heroic | robot
 };
+
 let cosmetics = { suit: "#1f4bff", cape: "#d10000", mask: "#111111", trail: "none" };
 let unlocks = { spark: false, neon: false };
 let coins = 0;
@@ -134,9 +156,15 @@ function loadAll() {
   if (cosmetics.trail === "spark" && !unlocks.spark) cosmetics.trail = "none";
   if (cosmetics.trail === "neon" && !unlocks.neon) cosmetics.trail = "none";
 
-  // validate background
-  const allowed = new Set(["city_day", "city_night", "cloudy", "rainy"]);
-  if (!allowed.has(settings.background)) settings.background = "city_day";
+  // validate fields
+  const bgOK = new Set(["city_day", "city_night", "cloudy", "rainy"]);
+  if (!bgOK.has(settings.background)) settings.background = "city_day";
+
+  const musicOK = new Set(["none", "chill", "arcade", "night"]);
+  if (!musicOK.has(settings.music)) settings.music = "chill";
+
+  const sfxOK = new Set(["classic", "heroic", "robot"]);
+  if (!sfxOK.has(settings.sfxPack)) settings.sfxPack = "classic";
 }
 
 function getName() {
@@ -205,62 +233,163 @@ function renderLocalBoard() {
 }
 
 // ----------------------------
-// Sound (tones)
+// Audio: SFX + Music (tones)
 // ----------------------------
 let audioCtx = null;
+let musicTimer = null;
+let musicStep = 0;
 
 function audioOn() { return !!settings.soundOn; }
+function musicOn() { return !!settings.soundOn && !!settings.musicOn && settings.music !== "none"; }
 
 function ensureAudio() {
-  if (!audioOn()) return;
+  if (!settings.soundOn && !settings.musicOn) return;
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   if (audioCtx && audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
 }
 
-function beep(freq, durationMs, type = "sine", gainVal = 0.06) {
-  if (!audioOn()) return;
-  ensureAudio();
+function oscNote(freq, durationMs, type, gainVal) {
   if (!audioCtx) return;
-
   const o = audioCtx.createOscillator();
   const g = audioCtx.createGain();
   o.type = type;
   o.frequency.value = freq;
-  g.gain.value = gainVal;
+
+  // soft envelope (avoid clicks)
+  const t0 = audioCtx.currentTime;
+  const t1 = t0 + durationMs / 1000;
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(gainVal, t0 + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t1);
 
   o.connect(g);
   g.connect(audioCtx.destination);
-
-  o.start();
-  o.stop(audioCtx.currentTime + durationMs / 1000);
+  o.start(t0);
+  o.stop(t1);
 }
 
-function sfxFlap() { beep(420, 60, "square", 0.05); }
-function sfxScore() { beep(620, 70, "sine", 0.06); }
-function sfxPower() { beep(840, 110, "triangle", 0.06); }
-function sfxCrash() { beep(160, 180, "sawtooth", 0.05); }
+function sfxParams(kind) {
+  // kind: flap|score|power|crash
+  const pack = settings.sfxPack;
+
+  if (pack === "classic") {
+    if (kind === "flap")  return { f: 420, d: 60,  t: "square",   g: 0.06 };
+    if (kind === "score") return { f: 620, d: 70,  t: "sine",     g: 0.07 };
+    if (kind === "power") return { f: 840, d: 110, t: "triangle", g: 0.07 };
+    return                { f: 160, d: 180, t: "sawtooth", g: 0.06 };
+  }
+
+  if (pack === "heroic") {
+    if (kind === "flap")  return { f: 520, d: 70,  t: "triangle", g: 0.07 };
+    if (kind === "score") return { f: 740, d: 90,  t: "triangle", g: 0.07 };
+    if (kind === "power") return { f: 980, d: 140, t: "sine",     g: 0.07 };
+    return                { f: 110, d: 220, t: "sawtooth", g: 0.07 };
+  }
+
+  // robot
+  if (kind === "flap")  return { f: 300, d: 55,  t: "square",   g: 0.06 };
+  if (kind === "score") return { f: 460, d: 75,  t: "square",   g: 0.06 };
+  if (kind === "power") return { f: 620, d: 120, t: "square",   g: 0.06 };
+  return                { f: 90,  d: 240, t: "square",   g: 0.06 };
+}
+
+function playSfx(kind) {
+  if (!audioOn()) return;
+  ensureAudio();
+  if (!audioCtx) return;
+  const p = sfxParams(kind);
+  oscNote(p.f, p.d, p.t, p.g);
+}
+
+// Music patterns (very lightweight)
+const MUSIC = {
+  chill:  {
+    bpm: 92,
+    steps: [
+      [220, 440], [247, 494], [262, 523], [247, 494],
+      [196, 392], [220, 440], [247, 494], [220, 440],
+    ],
+    type: "sine",
+    gain: 0.025
+  },
+  arcade: {
+    bpm: 120,
+    steps: [
+      [330], [392], [440], [392],
+      [523], [392], [440], [392],
+    ],
+    type: "square",
+    gain: 0.018
+  },
+  night: {
+    bpm: 98,
+    steps: [
+      [185, 370], [207, 414], [233, 466], [207, 414],
+      [155, 311], [185, 370], [207, 414], [185, 370],
+    ],
+    type: "triangle",
+    gain: 0.022
+  }
+};
+
+function stopMusic() {
+  if (musicTimer) clearInterval(musicTimer);
+  musicTimer = null;
+  musicStep = 0;
+}
+
+function startMusicPreview(force = false) {
+  // force = true means play even if menu closed; we keep it simple
+  stopMusic();
+  if (!audioCtx) ensureAudio();
+  if (!audioCtx) return;
+
+  const key = settings.music;
+  if (key === "none") return;
+
+  const m = MUSIC[key];
+  const stepMs = Math.round((60_000 / m.bpm) / 2); // 8th-notes
+  musicTimer = setInterval(() => {
+    // only run if music enabled (unless force)
+    if (!force && !musicOn()) return;
+
+    const chord = m.steps[musicStep % m.steps.length];
+    for (const f of chord) oscNote(f, Math.max(90, stepMs - 10), m.type, m.gain);
+    musicStep++;
+  }, stepMs);
+}
+
+function ensureMusicState() {
+  // game music runs whenever: menu hidden AND musicOn()
+  if (menu.classList.contains("hidden") && musicOn()) {
+    if (!musicTimer) startMusicPreview(false);
+  } else {
+    // stop music if menu open or disabled
+    stopMusic();
+  }
+}
 
 // ----------------------------
-// Theme particles (rain/stars)
+// Theme particles
 // ----------------------------
-function initRain() {
-  rainDrops = [];
+function initRain(targetArray, w, h) {
+  targetArray.length = 0;
   for (let i = 0; i < RAIN_COUNT; i++) {
-    rainDrops.push({
-      x: Math.random() * canvas.width,
-      y: Math.random() * canvas.height,
+    targetArray.push({
+      x: Math.random() * w,
+      y: Math.random() * h,
       vy: 6 + Math.random() * 7,
       len: 10 + Math.random() * 14,
     });
   }
 }
 
-function initStars() {
-  stars = [];
+function initStars(targetArray, w, h) {
+  targetArray.length = 0;
   for (let i = 0; i < STAR_COUNT; i++) {
-    stars.push({
-      x: Math.random() * canvas.width,
-      y: Math.random() * (canvas.height * 0.65),
+    targetArray.push({
+      x: Math.random() * w,
+      y: Math.random() * (h * 0.65),
       r: 0.6 + Math.random() * 1.4,
       tw: Math.random() * Math.PI * 2,
     });
@@ -300,7 +429,8 @@ function startPlay() {
   started = true;
   paused = false;
   ensureAudio();
-  sfxFlap();
+  playSfx("flap");
+  ensureMusicState();
 }
 
 function togglePause() {
@@ -316,7 +446,8 @@ function endGame() {
   paused = false;
 
   ensureAudio();
-  sfxCrash();
+  playSfx("crash");
+  stopMusic();
 
   const name = ensureName();
 
@@ -371,7 +502,7 @@ function applyPower(type) {
     toastMsg("Slow-mo!");
   }
   ensureAudio();
-  sfxPower();
+  playSfx("power");
 
   coins += 5;
   coinsText.textContent = String(coins);
@@ -389,158 +520,135 @@ function heroHitBuilding(gapTop, gapBottom, bX, bRight) {
 }
 
 // ----------------------------
-// Drawing: backgrounds
+// Drawing helpers (shared by game + preview)
 // ----------------------------
-function drawClouds(strength = 1) {
-  ctx.globalAlpha = 0.18 * strength;
-  ctx.fillStyle = "#ffffff";
+function drawClouds(ctx2, f, w, h, strength = 1) {
+  ctx2.globalAlpha = 0.18 * strength;
+  ctx2.fillStyle = "#ffffff";
   for (let i = 0; i < 6; i++) {
-    const cx = (i * 120 + (frame * 0.5)) % (canvas.width + 160) - 80;
-    const cy = 70 + (i % 3) * 48;
-    ctx.beginPath();
-    ctx.arc(cx, cy, 22, 0, Math.PI * 2);
-    ctx.arc(cx + 22, cy + 6, 18, 0, Math.PI * 2);
-    ctx.arc(cx - 22, cy + 8, 16, 0, Math.PI * 2);
-    ctx.fill();
+    const cx = (i * 120 + (f * 0.5)) % (w + 160) - 80;
+    const cy = 28 + (i % 3) * 26;
+    ctx2.beginPath();
+    ctx2.arc(cx, cy, 16, 0, Math.PI * 2);
+    ctx2.arc(cx + 18, cy + 5, 13, 0, Math.PI * 2);
+    ctx2.arc(cx - 18, cy + 6, 12, 0, Math.PI * 2);
+    ctx2.fill();
   }
-  ctx.globalAlpha = 1;
+  ctx2.globalAlpha = 1;
 }
 
-function drawStars() {
-  ctx.save();
-  ctx.fillStyle = "#fff";
-  for (const s of stars) {
-    const tw = 0.55 + 0.45 * Math.sin(frame * 0.03 + s.tw);
-    ctx.globalAlpha = 0.25 + 0.55 * tw;
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-    ctx.fill();
+function drawStars(ctx2, f, starArr) {
+  ctx2.save();
+  ctx2.fillStyle = "#fff";
+  for (const s of starArr) {
+    const tw = 0.55 + 0.45 * Math.sin(f * 0.03 + s.tw);
+    ctx2.globalAlpha = 0.25 + 0.55 * tw;
+    ctx2.beginPath();
+    ctx2.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx2.fill();
   }
-  ctx.restore();
-  ctx.globalAlpha = 1;
+  ctx2.restore();
+  ctx2.globalAlpha = 1;
 }
 
-function drawRain() {
-  ctx.save();
-  ctx.globalAlpha = 0.35;
-  ctx.strokeStyle = "#d7f3ff";
-  ctx.lineWidth = 1;
+function drawRain(ctx2, dropArr, w, h) {
+  ctx2.save();
+  ctx2.globalAlpha = 0.35;
+  ctx2.strokeStyle = "#d7f3ff";
+  ctx2.lineWidth = 1;
 
-  for (const d of rainDrops) {
-    ctx.beginPath();
-    ctx.moveTo(d.x, d.y);
-    ctx.lineTo(d.x - 2, d.y + d.len);
-    ctx.stroke();
+  for (const d of dropArr) {
+    ctx2.beginPath();
+    ctx2.moveTo(d.x, d.y);
+    ctx2.lineTo(d.x - 2, d.y + d.len);
+    ctx2.stroke();
 
     d.y += d.vy;
     d.x -= 0.7;
 
-    if (d.y > canvas.height + 20) {
+    if (d.y > h + 20) {
       d.y = -20;
-      d.x = Math.random() * canvas.width;
+      d.x = Math.random() * w;
     }
-    if (d.x < -30) d.x = canvas.width + 30;
+    if (d.x < -30) d.x = w + 30;
   }
 
-  ctx.restore();
-  ctx.globalAlpha = 1;
+  ctx2.restore();
+  ctx2.globalAlpha = 1;
 }
 
-function drawSky() {
-  const bg = settings.background;
+function skylineColors(bg) {
+  if (bg === "city_night") return { c1: "#0d1433", c2: "#121a44", c3: "#1a2358" };
+  if (bg === "rainy")      return { c1: "#2f3a4a", c2: "#3b475b", c3: "#4a5870" };
+  if (bg === "cloudy")     return { c1: "#3a3f55", c2: "#4a5070", c3: "#59628a" };
+  return { c1: "#2b2b4f", c2: "#3a3a67", c3: "#4b4b85" };
+}
 
+function drawSkylineLayer(ctx2, f, w, color, baseY, alpha, speed) {
+  ctx2.globalAlpha = alpha;
+  ctx2.fillStyle = color;
+  const offset = -((f * speed) % 140);
+  for (let x = offset; x < w + 140; x += 140) {
+    const bw = 90;
+    const bh = 50 + ((x + f) % 45);
+    ctx2.fillRect(x, baseY - bh, bw, bh);
+  }
+  ctx2.globalAlpha = 1;
+}
+
+function drawBackground(ctx2, f, w, h, bg, starArr, rainArr) {
   if (bg === "city_night") {
-    const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    const sky = ctx2.createLinearGradient(0, 0, 0, h);
     sky.addColorStop(0, "#06122b");
     sky.addColorStop(1, "#1b1f3a");
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    drawStars();
-    drawClouds(0.5);
-    return;
-  }
-
-  if (bg === "cloudy") {
-    const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    ctx2.fillStyle = sky;
+    ctx2.fillRect(0, 0, w, h);
+    drawStars(ctx2, f, starArr);
+    drawClouds(ctx2, f, w, h, 0.5);
+  } else if (bg === "cloudy") {
+    const sky = ctx2.createLinearGradient(0, 0, 0, h);
     sky.addColorStop(0, "#9fb7c9");
     sky.addColorStop(1, "#d8e2ea");
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    drawClouds(1.3);
-    return;
-  }
-
-  if (bg === "rainy") {
-    const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    ctx2.fillStyle = sky;
+    ctx2.fillRect(0, 0, w, h);
+    drawClouds(ctx2, f, w, h, 1.3);
+  } else if (bg === "rainy") {
+    const sky = ctx2.createLinearGradient(0, 0, 0, h);
     sky.addColorStop(0, "#566a7a");
     sky.addColorStop(1, "#a7b7c3");
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    drawClouds(1.1);
-    return;
+    ctx2.fillStyle = sky;
+    ctx2.fillRect(0, 0, w, h);
+    drawClouds(ctx2, f, w, h, 1.1);
+  } else {
+    const sky = ctx2.createLinearGradient(0, 0, 0, h);
+    sky.addColorStop(0, "#87CEEB");
+    sky.addColorStop(1, "#cdeffd");
+    ctx2.fillStyle = sky;
+    ctx2.fillRect(0, 0, w, h);
+    drawClouds(ctx2, f, w, h, 0.8);
   }
 
-  // default city_day
-  const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
-  sky.addColorStop(0, "#87CEEB");
-  sky.addColorStop(1, "#cdeffd");
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  drawClouds(0.8);
-}
+  // Parallax skyline for all city-ish themes (including rainy/night)
+  const { c1, c2, c3 } = skylineColors(bg);
+  drawSkylineLayer(ctx2, f, w, c1, h - 10, 0.85, 0.25);
+  drawSkylineLayer(ctx2, f, w, c2, h - 28, 0.75, 0.45);
+  drawSkylineLayer(ctx2, f, w, c3, h - 46, 0.65, 0.70);
 
-function skylineColors() {
-  // returns { c1,c2,c3 } for layers
-  if (settings.background === "city_night") {
-    return { c1: "#0d1433", c2: "#121a44", c3: "#1a2358" };
-  }
-  if (settings.background === "rainy") {
-    return { c1: "#2f3a4a", c2: "#3b475b", c3: "#4a5870" };
-  }
-  if (settings.background === "cloudy") {
-    return { c1: "#3a3f55", c2: "#4a5070", c3: "#59628a" };
-  }
-  return { c1: "#2b2b4f", c2: "#3a3a67", c3: "#4b4b85" }; // day
-}
-
-function drawSkylineLayer(speed, color, baseY, alpha) {
-  ctx.globalAlpha = alpha;
-  ctx.fillStyle = color;
-
-  const offset = -((frame * speed) % 140);
-  for (let x = offset; x < canvas.width + 140; x += 140) {
-    const w = 90;
-    const h = 80 + ((x + frame) % 70);
-    ctx.fillRect(x, baseY - h, w, h);
-  }
-
-  ctx.globalAlpha = 1;
-}
-
-function drawParallaxCity() {
-  const { c1, c2, c3 } = skylineColors();
-  drawSkylineLayer(0.25, c1, 420, 0.80);
-  drawSkylineLayer(0.45, c2, 360, 0.70);
-  drawSkylineLayer(0.70, c3, 300, 0.60);
-
-  // Rain overlay AFTER skyline for rainy theme
-  if (settings.background === "rainy") drawRain();
+  if (bg === "rainy") drawRain(ctx2, rainArr, w, h);
 }
 
 // ----------------------------
-// Drawing: buildings/hero/powerups
+// Game drawing: buildings/hero/powerups
 // ----------------------------
 function drawBuilding(x, y, width, height) {
   ctx.fillStyle = "#7a0a0a";
   ctx.fillRect(x, y, width, height);
 
-  // side shading
   ctx.globalAlpha = 0.22;
   ctx.fillStyle = "#000";
   ctx.fillRect(x + width - 10, y, 10, height);
   ctx.globalAlpha = 1;
 
-  // brick lines
   ctx.strokeStyle = "#4e0707";
   ctx.lineWidth = 1;
 
@@ -561,7 +669,6 @@ function drawBuilding(x, y, width, height) {
     }
   }
 
-  // windows (brighter at night)
   const nightBoost = settings.background === "city_night" ? 1.0 : 0.0;
   ctx.fillStyle = `rgba(255, 234, 120, ${0.55 + nightBoost * 0.35})`;
 
@@ -574,7 +681,6 @@ function drawBuilding(x, y, width, height) {
 
 function drawPowerup(p) {
   if (!p || p.taken) return;
-
   ctx.save();
   ctx.translate(p.x, p.y);
 
@@ -630,7 +736,6 @@ function drawHero() {
   const x = hero.x;
   const y = hero.y;
 
-  // shield glow
   if (now() < shieldUntil) {
     ctx.globalAlpha = 0.22;
     ctx.fillStyle = "#00aaff";
@@ -642,7 +747,6 @@ function drawHero() {
 
   drawTrail();
 
-  // cape flutter
   const flutter = Math.sin(frame * 0.2) * 4;
   ctx.fillStyle = cosmetics.cape;
   ctx.beginPath();
@@ -652,30 +756,24 @@ function drawHero() {
   ctx.closePath();
   ctx.fill();
 
-  // suit
   ctx.fillStyle = cosmetics.suit;
   ctx.fillRect(x, y + 10, 34, 24);
 
-  // belt
   ctx.fillStyle = "#ffd400";
   ctx.fillRect(x + 6, y + 26, 22, 4);
 
-  // head
   ctx.fillStyle = "#ffcc99";
   ctx.beginPath();
   ctx.arc(x + 17, y + 6, 10, 0, Math.PI * 2);
   ctx.fill();
 
-  // mask
   ctx.fillStyle = cosmetics.mask;
   ctx.fillRect(x + 7, y + 2, 20, 6);
 
-  // eyes
   ctx.fillStyle = "#fff";
   ctx.fillRect(x + 10, y + 4, 6, 2);
   ctx.fillRect(x + 19, y + 4, 6, 2);
 
-  // emblem
   ctx.fillStyle = "#fff";
   ctx.beginPath();
   ctx.arc(x + 17, y + 20, 4, 0, Math.PI * 2);
@@ -688,18 +786,14 @@ function drawHero() {
 function update() {
   if (!started || gameOver || paused) return;
 
-  // physics
   hero.vy += GRAVITY;
   hero.y += hero.vy;
 
-  // bounds
   if (hero.y + hero.h > canvas.height) { hero.y = canvas.height - hero.h; endGame(); return; }
   if (hero.y < 0) { hero.y = 0; endGame(); return; }
 
-  // spawn
   if (frame % SPAWN_EVERY_FRAMES === 0) spawnBuildingPair();
 
-  // move/collide/score
   const spd = buildingSpeed();
   for (const b of buildings) {
     b.x -= spd;
@@ -708,7 +802,6 @@ function update() {
     const gapBottom = b.top + GAP_SIZE;
     const right = b.x + BUILDING_WIDTH;
 
-    // power-up positioning + pickup
     if (b.power && !b.power.taken) {
       b.power.x = b.x + BUILDING_WIDTH / 2;
       const dx = (hero.x + hero.w / 2) - b.power.x;
@@ -719,27 +812,23 @@ function update() {
       }
     }
 
-    // collision
     const hit = heroHitBuilding(gapTop, gapBottom, b.x, right);
     if (hit) {
       if (now() < shieldUntil) {
         shieldUntil = 0;
         toastMsg("Shield saved you!");
-        ensureAudio();
-        sfxPower();
+        playSfx("power");
       } else {
         endGame();
         return;
       }
     }
 
-    // score on passing buildings
     if (!b.passed && right < hero.x) {
       b.passed = true;
       score++;
       scoreText.textContent = String(score);
-      ensureAudio();
-      sfxScore();
+      playSfx("score");
 
       coins += 1;
       coinsText.textContent = String(coins);
@@ -754,8 +843,7 @@ function update() {
 
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  drawSky();
-  drawParallaxCity();
+  drawBackground(ctx, frame, canvas.width, canvas.height, settings.background, stars, rainDrops);
 
   for (const b of buildings) {
     drawBuilding(b.x, 0, BUILDING_WIDTH, b.top);
@@ -773,10 +861,30 @@ function draw() {
   }
 }
 
+function drawPreview() {
+  const w = previewCanvas.width;
+  const h = previewCanvas.height;
+  pctx.clearRect(0, 0, w, h);
+
+  // use same bg renderer, but with preview arrays
+  drawBackground(pctx, frame, w, h, settings.background, previewStars, previewRainDrops);
+
+  // add a tiny label
+  pctx.globalAlpha = 0.9;
+  pctx.fillStyle = "rgba(0,0,0,0.55)";
+  pctx.fillRect(8, 8, 130, 22);
+  pctx.fillStyle = "#fff";
+  pctx.font = "12px Arial";
+  pctx.fillText("Preview: " + settings.background, 14, 23);
+  pctx.globalAlpha = 1;
+}
+
 function loop() {
   frame++;
   update();
   draw();
+  drawPreview();
+  ensureMusicState();
   animationId = requestAnimationFrame(loop);
 }
 
@@ -790,7 +898,7 @@ canvas.addEventListener("pointerdown", (e) => {
   ensureAudio();
   if (menu.classList.contains("hidden")) {
     if (gameOver) reset();
-    else { hero.vy = LIFT; sfxFlap(); }
+    else { hero.vy = LIFT; playSfx("flap"); }
   }
 }, { passive: false });
 
@@ -800,7 +908,7 @@ document.addEventListener("keydown", (e) => {
   ensureAudio();
   if (menu.classList.contains("hidden")) {
     if (gameOver) reset();
-    else { hero.vy = LIFT; sfxFlap(); }
+    else { hero.vy = LIFT; playSfx("flap"); }
   }
 });
 
@@ -823,14 +931,25 @@ closeSettings.addEventListener("click", () => {
 });
 
 shopButton.addEventListener("click", () => shopPanel.classList.toggle("hidden"));
-
 changeNameButton.addEventListener("click", () => promptName());
 
-// settings inputs
+// Settings inputs
 soundToggle.addEventListener("change", () => {
   settings.soundOn = !!soundToggle.checked;
   saveAll();
-  toastMsg(settings.soundOn ? "Sound ON" : "Sound OFF");
+  if (!settings.soundOn) {
+    stopMusic();
+    toastMsg("Sound OFF");
+  } else {
+    toastMsg("Sound ON");
+  }
+});
+
+musicToggle.addEventListener("change", () => {
+  settings.musicOn = !!musicToggle.checked;
+  saveAll();
+  toastMsg(settings.musicOn ? "Music ON" : "Music OFF");
+  ensureMusicState();
 });
 
 bgSelect.addEventListener("change", () => {
@@ -838,6 +957,37 @@ bgSelect.addEventListener("change", () => {
   saveAll();
   toastMsg(`Background: ${bgSelect.options[bgSelect.selectedIndex].text}`);
 });
+
+musicSelect.addEventListener("change", () => {
+  settings.music = musicSelect.value;
+  saveAll();
+  toastMsg(`Track: ${musicSelect.options[musicSelect.selectedIndex].text}`);
+  ensureMusicState();
+});
+
+musicPlayPreview.addEventListener("click", () => {
+  ensureAudio();
+  if (!audioCtx) return toastMsg("Tap the canvas once to enable audio.");
+  // force preview even if menu open
+  startMusicPreview(true);
+  toastMsg("Music preview playing");
+});
+
+musicStopPreview.addEventListener("click", () => {
+  stopMusic();
+  toastMsg("Music stopped");
+});
+
+sfxSelect.addEventListener("change", () => {
+  settings.sfxPack = sfxSelect.value;
+  saveAll();
+  toastMsg(`SFX Pack: ${sfxSelect.options[sfxSelect.selectedIndex].text}`);
+});
+
+sfxTestFlap.addEventListener("click", () => { ensureAudio(); playSfx("flap"); });
+sfxTestScore.addEventListener("click", () => { ensureAudio(); playSfx("score"); });
+sfxTestPower.addEventListener("click", () => { ensureAudio(); playSfx("power"); });
+sfxTestCrash.addEventListener("click", () => { ensureAudio(); playSfx("crash"); });
 
 suitColor.addEventListener("input", () => { cosmetics.suit = suitColor.value; saveAll(); });
 capeColor.addEventListener("input", () => { cosmetics.cape = capeColor.value; saveAll(); });
@@ -851,7 +1001,7 @@ trailSelect.addEventListener("change", () => {
   saveAll();
 });
 
-// shop
+// Shop
 buySpark.addEventListener("click", () => {
   if (unlocks.spark) return toastMsg("Spark already unlocked.");
   if (coins < 50) return toastMsg("Need 50 coins.");
@@ -881,13 +1031,19 @@ buyNeon.addEventListener("click", () => {
   const name = ensureName();
   playerNameText.textContent = name;
 
-  // init theme particles once
-  initRain();
-  initStars();
+  // init particles for game + preview
+  initRain(rainDrops, canvas.width, canvas.height);
+  initStars(stars, canvas.width, canvas.height);
+  initRain(previewRainDrops, previewCanvas.width, previewCanvas.height);
+  initStars(previewStars, previewCanvas.width, previewCanvas.height);
 
   // reflect UI
   soundToggle.checked = !!settings.soundOn;
+  musicToggle.checked = !!settings.musicOn;
+
   bgSelect.value = settings.background;
+  musicSelect.value = settings.music;
+  sfxSelect.value = settings.sfxPack;
 
   suitColor.value = cosmetics.suit;
   capeColor.value = cosmetics.cape;
