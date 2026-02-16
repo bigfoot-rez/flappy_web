@@ -1,6 +1,6 @@
 // ============================
 // SKY HERO DASH (Local LB only)
-// v11: FIX mobile crash (no ctx.roundRect)
+// v12: pause menu overlay + music preview fix + death freeze fix + animal heads/bodies
 // ============================
 
 const canvas = document.getElementById("gameCanvas");
@@ -58,6 +58,14 @@ const buyNeon = document.getElementById("buyNeon");
 const localLeaderboardEl = document.getElementById("localLeaderboard");
 const toast = document.getElementById("toast");
 
+// Overlay (pause/gameover)
+const overlay = document.getElementById("overlay");
+const overlayTitle = document.getElementById("overlayTitle");
+const overlaySubtitle = document.getElementById("overlaySubtitle");
+const overlayResume = document.getElementById("overlayResume");
+const overlayHome = document.getElementById("overlayHome");
+const overlaySettings = document.getElementById("overlaySettings");
+
 // ----------------------------
 // LocalStorage keys
 // ----------------------------
@@ -67,7 +75,7 @@ const LS = {
   coins: "skyhero_coins_v1",
   unlocks: "skyhero_unlocks_v1",
   settings: "skyhero_settings_v4",
-  cosmetics: "skyhero_cosmetics_v2",
+  cosmetics: "skyhero_cosmetics_v3", // v3 keeps animal options too
   localBoard: "skyhero_localboard_v1",
 };
 
@@ -121,8 +129,8 @@ let cosmetics = {
   cape: "#d10000",
   mask: "#111111",
   trail: "none",
-  body: "classic",
-  head: "classic",
+  body: "classic",   // classic | armored | speed | animal_cat | animal_dog | animal_fox
+  head: "classic",   // classic | helmet | hood | animal_cat | animal_dog | animal_fox
 };
 
 let unlocks = { spark: false, neon: false };
@@ -174,11 +182,9 @@ function loadAll() {
   const sfxOK = new Set(["classic", "heroic", "robot"]);
   if (!sfxOK.has(settings.sfxPack)) settings.sfxPack = "classic";
 
-  const bodyOK = new Set(["classic", "armored", "speed"]);
-  if (!bodyOK.has(cosmetics.body)) cosmetics.body = "classic";
-
-  const headOK = new Set(["classic", "helmet", "hood"]);
-  if (!headOK.has(cosmetics.head)) cosmetics.head = "classic";
+  const partOK = new Set(["classic","armored","speed","animal_cat","animal_dog","animal_fox","helmet","hood"]);
+  if (!partOK.has(cosmetics.body)) cosmetics.body = "classic";
+  if (!partOK.has(cosmetics.head)) cosmetics.head = "classic";
 }
 
 function getName() { return localStorage.getItem(LS.name) || ""; }
@@ -244,7 +250,7 @@ function renderLocalBoard() {
 }
 
 // ----------------------------
-// Canvas helpers (NO roundRect)
+// Canvas helper: rounded rect path (mobile-safe)
 // ----------------------------
 function roundedRectPath(ctx2, x, y, w, h, r) {
   const rr = Math.max(0, Math.min(r, Math.min(w, h) / 2));
@@ -258,11 +264,12 @@ function roundedRectPath(ctx2, x, y, w, h, r) {
 }
 
 // ----------------------------
-// Audio
+// Audio (SFX + Music)
 // ----------------------------
 let audioCtx = null;
 let musicTimer = null;
 let musicStep = 0;
+let musicPreviewActive = false; // <-- key fix: prevent game loop from stopping preview
 
 function ensureAudio() {
   if (!settings.soundOn && !settings.musicOn) return;
@@ -332,32 +339,45 @@ function stopMusic() {
 
 function canPlayMusicInGame() {
   return menu.classList.contains("hidden")
+    && !paused
+    && !gameOver
     && settings.soundOn
     && settings.musicOn
     && settings.music !== "none";
 }
 
-function startMusicLoop(force = false) {
+function startMusicLoop({ force = false, preview = false } = {}) {
   stopMusic();
   ensureAudio();
   if (!audioCtx) return;
 
   const key = settings.music;
   if (key === "none") return;
+
   const m = MUSIC[key];
   const stepMs = Math.round((60_000 / m.bpm) / 2);
 
+  musicPreviewActive = !!preview;
+
   musicTimer = setInterval(() => {
-    if (!force && !canPlayMusicInGame()) return;
+    if (!force && !preview && !canPlayMusicInGame()) return;
     const chord = m.steps[musicStep % m.steps.length];
     for (const f of chord) oscNote(f, Math.max(90, stepMs - 10), m.type, m.gain);
     musicStep++;
   }, stepMs);
 }
 
+function stopMusicPreview() {
+  musicPreviewActive = false;
+  stopMusic();
+}
+
 function ensureMusicState() {
+  // If preview is active, NEVER auto-stop it.
+  if (musicPreviewActive) return;
+
   if (canPlayMusicInGame()) {
-    if (!musicTimer) startMusicLoop(false);
+    if (!musicTimer) startMusicLoop({ force: false, preview: false });
   } else {
     stopMusic();
   }
@@ -377,6 +397,26 @@ function initStars(arr, w, h) {
   for (let i = 0; i < STAR_COUNT; i++) {
     arr.push({ x: Math.random()*w, y: Math.random()*(h*0.65), r: 0.6+Math.random()*1.4, tw: Math.random()*Math.PI*2 });
   }
+}
+
+// ----------------------------
+// Overlay helpers
+// ----------------------------
+function showOverlay(kind) {
+  overlay.classList.remove("hidden");
+
+  if (kind === "paused") {
+    overlayTitle.textContent = "Paused";
+    overlaySubtitle.textContent = "Resume, change settings, or go home.";
+    overlayResume.textContent = "Resume";
+  } else {
+    overlayTitle.textContent = "Game Over";
+    overlaySubtitle.textContent = "Try again or adjust your setup.";
+    overlayResume.textContent = "Play Again";
+  }
+}
+function hideOverlay() {
+  overlay.classList.add("hidden");
 }
 
 // ----------------------------
@@ -402,37 +442,61 @@ function initGame() {
 }
 
 function reset() {
-  if (animationId) cancelAnimationFrame(animationId);
   initGame();
-  animationId = requestAnimationFrame(loop);
+  hideOverlay();
 }
 
 function startPlay() {
+  // IMPORTANT FIX: if you died, we MUST reset before playing again.
+  if (gameOver) reset();
+
+  // stop music preview if it was running
+  stopMusicPreview();
+
   menu.classList.add("hidden");
+  settingsPanel.classList.add("hidden");
+  shopPanel.classList.add("hidden");
+
   started = true;
   paused = false;
+  gameOver = false;
+
   ensureAudio();
   playSfx("flap");
   ensureMusicState();
 }
 
 function togglePause() {
-  if (gameOver || !started) return;
+  if (!started || gameOver) return;
+
   paused = !paused;
   pauseButton.textContent = paused ? "Resume" : "Pause";
-  toastMsg(paused ? "Paused" : "Go!");
+
+  if (paused) {
+    stopMusic(); // pause music
+    showOverlay("paused");
+    toastMsg("Paused");
+  } else {
+    hideOverlay();
+    toastMsg("Go!");
+    ensureMusicState();
+  }
 }
 
 function endGame() {
   if (gameOver) return;
+
   gameOver = true;
   paused = false;
+  stopMusic();
+  hideOverlay(); // ensure clean
+  showOverlay("gameover");
 
   ensureAudio();
   playSfx("crash");
-  stopMusic();
 
   const name = ensureName();
+
   if (score > best) {
     best = score;
     localStorage.setItem(LS.best, String(best));
@@ -444,7 +508,6 @@ function endGame() {
   saveAll();
 
   submitLocalScore(name, score);
-  menu.classList.remove("hidden");
 }
 
 // ----------------------------
@@ -492,7 +555,7 @@ function heroHitBuilding(gapTop, gapBottom, bX, bRight) {
 }
 
 // ----------------------------
-// Background (same as before)
+// Background renderer
 // ----------------------------
 function drawClouds(ctx2, f, w, h, strength=1) {
   ctx2.globalAlpha = 0.18 * strength;
@@ -597,7 +660,7 @@ function drawBackground(ctx2, f, w, h, bg, starArr, rainArr) {
 }
 
 // ----------------------------
-// Draw: buildings
+// Buildings
 // ----------------------------
 function drawBuilding(x, y, width, height) {
   ctx.fillStyle = "#7a0a0a";
@@ -655,10 +718,11 @@ function drawPowerup(p) {
 }
 
 // ----------------------------
-// Hero drawing (mobile-safe)
+// Hero drawing (animals supported)
 // ----------------------------
 function drawTrail(ctx2, f, hx, hy, trail) {
   if (trail === "none") return;
+
   const x = hx - 6;
   const y = hy + 18;
 
@@ -687,6 +751,70 @@ function drawTrail(ctx2, f, hx, hy, trail) {
   }
 }
 
+function drawAnimalHead(ctx2, hx, hy, kind, furColor, maskColor) {
+  // head base
+  ctx2.fillStyle = furColor;
+  ctx2.beginPath();
+  ctx2.arc(hx + 17, hy + 8, 10, 0, Math.PI*2);
+  ctx2.fill();
+
+  // ears
+  ctx2.fillStyle = furColor;
+  if (kind === "animal_cat" || kind === "animal_fox") {
+    ctx2.beginPath();
+    ctx2.moveTo(hx + 10, hy + 2);
+    ctx2.lineTo(hx + 6, hy - 8);
+    ctx2.lineTo(hx + 14, hy - 2);
+    ctx2.closePath();
+    ctx2.fill();
+
+    ctx2.beginPath();
+    ctx2.moveTo(hx + 24, hy + 2);
+    ctx2.lineTo(hx + 28, hy - 8);
+    ctx2.lineTo(hx + 20, hy - 2);
+    ctx2.closePath();
+    ctx2.fill();
+  } else if (kind === "animal_dog") {
+    // floppy ears
+    ctx2.globalAlpha = 0.85;
+    ctx2.beginPath();
+    ctx2.ellipse(hx + 7, hy + 8, 5, 8, 0.4, 0, Math.PI*2);
+    ctx2.fill();
+    ctx2.beginPath();
+    ctx2.ellipse(hx + 27, hy + 8, 5, 8, -0.4, 0, Math.PI*2);
+    ctx2.fill();
+    ctx2.globalAlpha = 1;
+  }
+
+  // snout
+  ctx2.fillStyle = "rgba(255,255,255,0.55)";
+  ctx2.beginPath();
+  ctx2.ellipse(hx + 17, hy + 12, 7, 5, 0, 0, Math.PI*2);
+  ctx2.fill();
+
+  // nose
+  ctx2.fillStyle = maskColor;
+  ctx2.beginPath();
+  ctx2.arc(hx + 17, hy + 12, 2.2, 0, Math.PI*2);
+  ctx2.fill();
+
+  // eyes
+  ctx2.fillStyle = "#fff";
+  ctx2.fillRect(hx + 11, hy + 7, 5, 2);
+  ctx2.fillRect(hx + 20, hy + 7, 5, 2);
+
+  // fox cheeks
+  if (kind === "animal_fox") {
+    ctx2.globalAlpha = 0.25;
+    ctx2.fillStyle = "#fff";
+    ctx2.beginPath();
+    ctx2.arc(hx + 10, hy + 12, 4, 0, Math.PI*2);
+    ctx2.arc(hx + 24, hy + 12, 4, 0, Math.PI*2);
+    ctx2.fill();
+    ctx2.globalAlpha = 1;
+  }
+}
+
 function drawHeroVariant(ctx2, f, hx, hy, opts) {
   const { suit, cape, mask, body, head, trail, shielded } = opts;
 
@@ -701,6 +829,7 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
 
   drawTrail(ctx2, f, hx, hy, trail);
 
+  // cape (for animals too, still fun)
   const flutter = Math.sin(f * 0.2) * 4;
   ctx2.fillStyle = cape;
   ctx2.beginPath();
@@ -710,8 +839,23 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
   ctx2.closePath();
   ctx2.fill();
 
-  // body
-  if (body === "armored") {
+  // BODY
+  if (body.startsWith("animal_")) {
+    // animal torso
+    ctx2.fillStyle = suit;
+    ctx2.beginPath();
+    ctx2.ellipse(hx + 17, hy + 22, 16, 12, 0, 0, Math.PI*2);
+    ctx2.fill();
+
+    // tiny paws
+    ctx2.globalAlpha = 0.25;
+    ctx2.fillStyle = "#000";
+    ctx2.beginPath();
+    ctx2.arc(hx + 9, hy + 30, 2, 0, Math.PI*2);
+    ctx2.arc(hx + 25, hy + 30, 2, 0, Math.PI*2);
+    ctx2.fill();
+    ctx2.globalAlpha = 1;
+  } else if (body === "armored") {
     ctx2.fillStyle = suit;
     ctx2.fillRect(hx, hy + 10, 34, 24);
     ctx2.globalAlpha = 0.25;
@@ -734,12 +878,16 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
     ctx2.fillRect(hx, hy + 10, 34, 24);
   }
 
-  // belt
-  ctx2.fillStyle = "#ffd400";
-  ctx2.fillRect(hx + 6, hy + 26, 22, 4);
+  // Belt/emblem line for non-animals (animals look better without belt)
+  if (!body.startsWith("animal_")) {
+    ctx2.fillStyle = "#ffd400";
+    ctx2.fillRect(hx + 6, hy + 26, 22, 4);
+  }
 
-  // head
-  if (head === "helmet") {
+  // HEAD
+  if (head.startsWith("animal_")) {
+    drawAnimalHead(ctx2, hx, hy, head, suit, mask);
+  } else if (head === "helmet") {
     ctx2.fillStyle = "#c7c7c7";
     ctx2.beginPath();
     ctx2.arc(hx + 17, hy + 6, 11, Math.PI, 0);
@@ -747,40 +895,44 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
     ctx2.lineTo(hx + 6, hy + 10);
     ctx2.closePath();
     ctx2.fill();
-
     ctx2.fillStyle = mask;
     ctx2.fillRect(hx + 7, hy + 4, 20, 6);
+    ctx2.fillStyle = "#fff";
+    ctx2.fillRect(hx + 10, hy + 6, 6, 2);
+    ctx2.fillRect(hx + 19, hy + 6, 6, 2);
   } else if (head === "hood") {
     ctx2.fillStyle = "#2b2b2b";
     ctx2.beginPath();
     ctx2.arc(hx + 17, hy + 7, 12, 0, Math.PI*2);
     ctx2.fill();
-
     ctx2.fillStyle = "#ffcc99";
     ctx2.beginPath();
     ctx2.arc(hx + 17, hy + 8, 8, 0, Math.PI*2);
     ctx2.fill();
-
     ctx2.fillStyle = mask;
     ctx2.fillRect(hx + 9, hy + 6, 16, 5);
+    ctx2.fillStyle = "#fff";
+    ctx2.fillRect(hx + 11, hy + 7, 5, 2);
+    ctx2.fillRect(hx + 20, hy + 7, 5, 2);
   } else {
     ctx2.fillStyle = "#ffcc99";
     ctx2.beginPath();
     ctx2.arc(hx + 17, hy + 6, 10, 0, Math.PI*2);
     ctx2.fill();
-
     ctx2.fillStyle = mask;
     ctx2.fillRect(hx + 7, hy + 2, 20, 6);
+    ctx2.fillStyle = "#fff";
+    ctx2.fillRect(hx + 10, hy + 4, 6, 2);
+    ctx2.fillRect(hx + 19, hy + 4, 6, 2);
   }
 
-  // eyes + emblem
-  ctx2.fillStyle = "#fff";
-  ctx2.fillRect(hx + 10, hy + 6, 6, 2);
-  ctx2.fillRect(hx + 19, hy + 6, 6, 2);
-
-  ctx2.beginPath();
-  ctx2.arc(hx + 17, hy + 20, 4, 0, Math.PI*2);
-  ctx2.fill();
+  // emblem dot (skip for animal, looks weird)
+  if (!body.startsWith("animal_")) {
+    ctx2.fillStyle = "#fff";
+    ctx2.beginPath();
+    ctx2.arc(hx + 17, hy + 20, 4, 0, Math.PI*2);
+    ctx2.fill();
+  }
 }
 
 function drawHero() {
@@ -869,10 +1021,11 @@ function draw() {
 
   drawHero();
 
-  if (paused && menu.classList.contains("hidden")) {
-    ctx.fillStyle = "rgba(0,0,0,0.7)";
-    ctx.font = "28px Arial";
-    ctx.fillText("Paused", 145, 290);
+  if (paused) {
+    ctx.globalAlpha = 0.15;
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.globalAlpha = 1;
   }
 }
 
@@ -926,9 +1079,17 @@ document.addEventListener("dblclick", (e) => e.preventDefault(), { passive: fals
 canvas.addEventListener("pointerdown", (e) => {
   e.preventDefault();
   ensureAudio();
-  if (menu.classList.contains("hidden")) {
-    if (gameOver) reset();
-    else { hero.vy = LIFT; playSfx("flap"); }
+
+  // If game over, tapping canvas restarts immediately (no pull-to-refresh needed)
+  if (gameOver) {
+    reset();
+    startPlay();
+    return;
+  }
+
+  if (menu.classList.contains("hidden") && !paused) {
+    hero.vy = LIFT;
+    playSfx("flap");
   }
 }, { passive: false });
 
@@ -936,64 +1097,115 @@ document.addEventListener("keydown", (e) => {
   if (e.code !== "Space") return;
   e.preventDefault();
   ensureAudio();
-  if (menu.classList.contains("hidden")) {
-    if (gameOver) reset();
-    else { hero.vy = LIFT; playSfx("flap"); }
+
+  if (gameOver) {
+    reset();
+    startPlay();
+    return;
+  }
+
+  if (menu.classList.contains("hidden") && !paused) {
+    hero.vy = LIFT;
+    playSfx("flap");
   }
 });
 
 // ----------------------------
 // UI wiring
 // ----------------------------
-resetButton.addEventListener("click", () => reset());
+resetButton.addEventListener("click", () => { reset(); toastMsg("Reset"); });
 pauseButton.addEventListener("click", () => togglePause());
+
 playButton.addEventListener("click", () => startPlay());
 
 settingsButton.addEventListener("click", () => {
   settingsPanel.classList.toggle("hidden");
   shopPanel.classList.add("hidden");
 });
+
 closeSettings.addEventListener("click", () => {
   settingsPanel.classList.add("hidden");
   shopPanel.classList.add("hidden");
 });
+
 shopButton.addEventListener("click", () => shopPanel.classList.toggle("hidden"));
 changeNameButton.addEventListener("click", () => promptName());
 
-// settings controls
+// Overlay buttons
+overlayResume.addEventListener("click", () => {
+  if (gameOver) {
+    reset();
+    startPlay();
+  } else {
+    togglePause(); // resumes
+  }
+});
+overlayHome.addEventListener("click", () => {
+  paused = false;
+  gameOver = false;
+  started = false;
+  hideOverlay();
+  stopMusicPreview();
+  stopMusic();
+  menu.classList.remove("hidden");
+  settingsPanel.classList.add("hidden");
+  shopPanel.classList.add("hidden");
+});
+overlaySettings.addEventListener("click", () => {
+  // Go to home + open settings
+  paused = false;
+  hideOverlay();
+  stopMusicPreview();
+  stopMusic();
+  menu.classList.remove("hidden");
+  settingsPanel.classList.remove("hidden");
+  shopPanel.classList.add("hidden");
+});
+
+// Settings controls
 soundToggle.addEventListener("change", () => {
   settings.soundOn = !!soundToggle.checked;
   saveAll();
-  if (!settings.soundOn) { stopMusic(); toastMsg("Sound OFF"); }
+  if (!settings.soundOn) { stopMusicPreview(); stopMusic(); toastMsg("Sound OFF"); }
   else toastMsg("Sound ON");
 });
+
 musicToggle.addEventListener("change", () => {
   settings.musicOn = !!musicToggle.checked;
   saveAll();
   toastMsg(settings.musicOn ? "Music ON" : "Music OFF");
-  ensureMusicState();
+  if (!settings.musicOn) { stopMusicPreview(); stopMusic(); }
 });
+
 bgSelect.addEventListener("change", () => {
   settings.background = bgSelect.value;
   saveAll();
   toastMsg(`Background: ${bgSelect.options[bgSelect.selectedIndex].text}`);
 });
+
 musicSelect.addEventListener("change", () => {
   settings.music = musicSelect.value;
   saveAll();
   toastMsg(`Track: ${musicSelect.options[musicSelect.selectedIndex].text}`);
-  ensureMusicState();
 });
+
+// Music preview (FIXED)
 musicPlayPreview.addEventListener("click", () => {
   ensureAudio();
-  if (!audioCtx) return toastMsg("Tap the game canvas once to enable audio.");
-  startMusicLoop(true);
+  if (!audioCtx) return toastMsg("Tap the game canvas once, then try preview.");
+  if (!settings.soundOn || !settings.musicOn || settings.music === "none") {
+    return toastMsg("Turn on Music + pick a track first.");
+  }
+  startMusicLoop({ force: true, preview: true });
   toastMsg("Music preview playing");
 });
+
 musicStopPreview.addEventListener("click", () => {
-  stopMusic();
+  stopMusicPreview();
   toastMsg("Music stopped");
 });
+
+// SFX
 sfxSelect.addEventListener("change", () => {
   settings.sfxPack = sfxSelect.value;
   saveAll();
@@ -1004,6 +1216,7 @@ sfxTestScore.addEventListener("click", () => { ensureAudio(); playSfx("score"); 
 sfxTestPower.addEventListener("click", () => { ensureAudio(); playSfx("power"); });
 sfxTestCrash.addEventListener("click", () => { ensureAudio(); playSfx("crash"); });
 
+// Cosmetics
 bodySelect.addEventListener("change", () => { cosmetics.body = bodySelect.value; saveAll(); toastMsg("Body updated"); });
 headSelect.addEventListener("change", () => { cosmetics.head = headSelect.value; saveAll(); toastMsg("Head updated"); });
 
@@ -1019,7 +1232,7 @@ trailSelect.addEventListener("change", () => {
   saveAll();
 });
 
-// shop
+// Shop
 buySpark.addEventListener("click", () => {
   if (unlocks.spark) return toastMsg("Spark already unlocked.");
   if (coins < 50) return toastMsg("Need 50 coins.");
@@ -1077,6 +1290,7 @@ buyNeon.addEventListener("click", () => {
   settingsPanel.classList.add("hidden");
   menu.classList.remove("hidden");
 
+  hideOverlay();
   initGame();
   loop();
 })();

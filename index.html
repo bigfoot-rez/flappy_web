@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Sky Hero Dash</title>
-  <link rel="stylesheet" href="style.css?v=11" />
+  <link rel="stylesheet" href="style.css?v=12" />
 </head>
 <body>
   <div id="app">
@@ -17,6 +17,20 @@
     </div>
 
     <canvas id="gameCanvas" width="400" height="600"></canvas>
+
+    <!-- PAUSE / GAMEOVER OVERLAY -->
+    <div id="overlay" class="overlay hidden">
+      <div class="overlayCard">
+        <div id="overlayTitle" class="overlayTitle">Paused</div>
+        <div id="overlaySubtitle" class="overlaySubtitle">Take a breath.</div>
+        <div class="menuRow">
+          <button id="overlayResume" class="btn big">Resume</button>
+          <button id="overlayHome" class="btn big secondary">Home</button>
+          <button id="overlaySettings" class="btn big secondary">Settings</button>
+        </div>
+        <div class="hint" style="text-align:center;">Tip: Home keeps your settings + unlocks.</div>
+      </div>
+    </div>
 
     <!-- HOME / MENU -->
     <div id="menu" class="menu">
@@ -82,7 +96,7 @@
                 <button id="musicPlayPreview" class="btn small">Play Preview</button>
                 <button id="musicStopPreview" class="btn small secondary">Stop</button>
               </div>
-              <div class="hint">On phones, audio starts after a tap.</div>
+              <div class="hint">If nothing plays, tap the game canvas once, then try again.</div>
             </div>
           </div>
 
@@ -119,6 +133,9 @@
                 <option value="classic">Classic</option>
                 <option value="armored">Armored</option>
                 <option value="speed">Speed Suit</option>
+                <option value="animal_cat">Animal: Cat</option>
+                <option value="animal_dog">Animal: Dog</option>
+                <option value="animal_fox">Animal: Fox</option>
               </select>
             </div>
 
@@ -128,11 +145,14 @@
                 <option value="classic">Classic</option>
                 <option value="helmet">Helmet</option>
                 <option value="hood">Hood</option>
+                <option value="animal_cat">Animal: Cat</option>
+                <option value="animal_dog">Animal: Dog</option>
+                <option value="animal_fox">Animal: Fox</option>
               </select>
             </div>
 
             <div class="field">
-              <div class="label">Suit</div>
+              <div class="label">Suit / Fur</div>
               <input id="suitColor" type="color" value="#1f4bff" />
             </div>
 
@@ -187,6 +207,6 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="game.js?v=11"></script>
+  <script src="game.js?v=12"></script>
 </body>
 </html>
