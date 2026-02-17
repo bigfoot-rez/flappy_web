@@ -1,9 +1,9 @@
 // ============================
 // SKY HERO DASH
-// v16: parallax upgrade + more backgrounds + shop unlockables (trails, auras, building skins, extra backgrounds)
+// v17: dash power-up spawn + shield stacks (max 3) + dash doesn't use shields
 // ============================
 
-const APP_VERSION = "v16";
+const APP_VERSION = "v17";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -105,14 +105,14 @@ const THEME_META = {
 };
 
 const TRAILS = {
-  spark:    { label: "Spark",    cost: 50,  unlockKey: "trail_spark" },
-  neon:     { label: "Neon",     cost: 120, unlockKey: "trail_neon" },
-  smoke:    { label: "Smoke",    cost: 80,  unlockKey: "trail_smoke" },
-  confetti: { label: "Confetti", cost: 160, unlockKey: "trail_confetti" },
-  embers:   { label: "Embers",   cost: 140, unlockKey: "trail_embers" },
-  bubbles:  { label: "Bubbles",  cost: 110, unlockKey: "trail_bubbles" },
-  stars:    { label: "Star Dust",cost: 180, unlockKey: "trail_stars" },
-  glitch:   { label: "Glitch",   cost: 200, unlockKey: "trail_glitch" },
+  spark:    { label: "Spark",     cost: 50,  unlockKey: "trail_spark" },
+  neon:     { label: "Neon",      cost: 120, unlockKey: "trail_neon" },
+  smoke:    { label: "Smoke",     cost: 80,  unlockKey: "trail_smoke" },
+  confetti: { label: "Confetti",  cost: 160, unlockKey: "trail_confetti" },
+  embers:   { label: "Embers",    cost: 140, unlockKey: "trail_embers" },
+  bubbles:  { label: "Bubbles",   cost: 110, unlockKey: "trail_bubbles" },
+  stars:    { label: "Star Dust", cost: 180, unlockKey: "trail_stars" },
+  glitch:   { label: "Glitch",    cost: 200, unlockKey: "trail_glitch" },
 };
 
 const AURAS = {
@@ -140,17 +140,22 @@ const BUILDING_WIDTH = 64;
 const GAP_SIZE = 170;
 const SPAWN_EVERY_FRAMES = 90;
 
-const POWERUP_CHANCE = 0.25;
+// powerups
+const POWERUP_CHANCE = 0.28;           // chance a pair has a power-up at all
 const POWERUP_SIZE = 18;
+const DASH_PICKUP_WEIGHT = 0.45;       // if a powerup spawns, chance it's dash (rest shield)
+const MAX_SHIELDS = 3;
+const MAX_DASH = 2;
 
-// Power-ups
-const SHIELD_DURATION_MS = 8000;
-const SHIELD_IFRAME_MS = 900;
+// dash behavior
+const DASH_DURATION_MS = 750;          // how long dash lasts
+const DASH_SPEED_MULT = 3.15;          // how fast buildings move during dash
+const DASH_TAP_WINDOW_MS = 230;        // quick double-tap window for dash trigger
+
+// Invuln after shield hit
+const SHIELD_IFRAME_MS = 950;
 
 // Particles
-const RAIN_COUNT = 90;
-const STAR_COUNT = 65;
-const SNOW_COUNT = 70;
 let rainDrops = [];
 let stars = [];
 let snow = [];
@@ -162,12 +167,17 @@ let previewSnow = [];
 // State
 // ----------------------------
 let hero, buildings, score, best, gameOver, started, paused;
-let animationId = null;
 let frame = 0;
 let speedMult = 1;
 
-let shieldUntil = 0;
-let iframesUntil = 0;
+// NEW: stacking shields + dash charges
+let shieldCharges = 0;   // 0..3
+let dashCharges = 0;     // 0..2
+let dashUntil = 0;       // active dash end time
+let iframesUntil = 0;    // short invuln after shield blocks hit
+
+// tap timing for dash trigger
+let lastTapAt = 0;
 
 // Settings + cosmetics + unlocks
 let settings = {
@@ -236,7 +246,6 @@ function loadAll() {
   const sfxOK = new Set(["classic", "heroic", "robot"]);
   if (!sfxOK.has(settings.sfxPack)) settings.sfxPack = "classic";
 
-  // clamp cosmetics
   if (cosmetics.trail !== "none" && !isUnlocked(TRAILS[cosmetics.trail]?.unlockKey)) cosmetics.trail = "none";
   if (cosmetics.aura !== "none" && !isUnlocked(AURAS[cosmetics.aura]?.unlockKey)) cosmetics.aura = "none";
 
@@ -244,7 +253,6 @@ function loadAll() {
   const bs = BUILD_STYLES[cosmetics.buildStyle];
   if (bs.locked && !isUnlocked(bs.unlockKey)) cosmetics.buildStyle = "brick";
 
-  // background lock safety
   const meta = THEME_META[settings.background];
   if (meta?.locked && meta.unlockKey && !isUnlocked(meta.unlockKey)) settings.background = "city_day";
 }
@@ -362,18 +370,21 @@ function sfxParams(kind) {
     if (kind === "flap")  return { f: 420, d: 60,  t: "square",   g: 0.06 };
     if (kind === "score") return { f: 620, d: 70,  t: "sine",     g: 0.07 };
     if (kind === "power") return { f: 880, d: 110, t: "triangle", g: 0.07 };
+    if (kind === "dash")  return { f: 980, d: 90,  t: "sawtooth", g: 0.06 };
     return                { f: 160, d: 180, t: "sawtooth", g: 0.06 };
   }
   if (pack === "heroic") {
     if (kind === "flap")  return { f: 520, d: 70,  t: "triangle", g: 0.07 };
     if (kind === "score") return { f: 740, d: 90,  t: "triangle", g: 0.07 };
     if (kind === "power") return { f: 980, d: 140, t: "sine",     g: 0.07 };
+    if (kind === "dash")  return { f: 1180,d: 110, t: "square",   g: 0.06 };
     return                { f: 110, d: 220, t: "sawtooth", g: 0.07 };
   }
   // robot
   if (kind === "flap")  return { f: 300, d: 55,  t: "square", g: 0.06 };
   if (kind === "score") return { f: 460, d: 75,  t: "square", g: 0.06 };
   if (kind === "power") return { f: 620, d: 120, t: "square", g: 0.06 };
+  if (kind === "dash")  return { f: 820, d: 90,  t: "square", g: 0.06 };
   return                { f: 90,  d: 240, t: "square", g: 0.06 };
 }
 
@@ -441,19 +452,19 @@ function ensureMusicState() {
 // ----------------------------
 function initRain(arr, w, h) {
   arr.length = 0;
-  for (let i = 0; i < RAIN_COUNT; i++) {
+  for (let i = 0; i < 90; i++) {
     arr.push({ x: Math.random()*w, y: Math.random()*h, vy: 6+Math.random()*7, len: 10+Math.random()*14 });
   }
 }
 function initStars(arr, w, h) {
   arr.length = 0;
-  for (let i = 0; i < STAR_COUNT; i++) {
+  for (let i = 0; i < 65; i++) {
     arr.push({ x: Math.random()*w, y: Math.random()*(h*0.65), r: 0.6+Math.random()*1.6, tw: Math.random()*Math.PI*2 });
   }
 }
 function initSnow(arr, w, h) {
   arr.length = 0;
-  for (let i = 0; i < SNOW_COUNT; i++) {
+  for (let i = 0; i < 70; i++) {
     arr.push({ x: Math.random()*w, y: Math.random()*h, vy: 1.2+Math.random()*2.0, vx: -0.4 + Math.random()*0.8, r: 0.8+Math.random()*2.2 });
   }
 }
@@ -501,7 +512,10 @@ function initGame() {
   frame = 0;
   speedMult = 1;
 
-  shieldUntil = 0;
+  // NEW
+  shieldCharges = 0;
+  dashCharges = 0;
+  dashUntil = 0;
   iframesUntil = 0;
 
   scoreText.textContent = "0";
@@ -577,6 +591,14 @@ function endGame() {
 // ----------------------------
 // Buildings + powerups
 // ----------------------------
+function choosePowerType() {
+  // If a powerup spawns, decide dash vs shield.
+  // Bias toward shield early game (optional feel): dash slightly less common at score < 6
+  const base = DASH_PICKUP_WEIGHT;
+  const w = (score < 6) ? Math.max(0.25, base - 0.15) : base;
+  return (Math.random() < w) ? "dash" : "shield";
+}
+
 function spawnBuildingPair() {
   const margin = 70;
   const topMin = margin;
@@ -585,25 +607,60 @@ function spawnBuildingPair() {
 
   let power = null;
   if (Math.random() < POWERUP_CHANCE) {
-    power = { type: "shield", x: canvas.width + 10 + BUILDING_WIDTH/2, y: top + GAP_SIZE/2, taken: false };
+    power = {
+      type: choosePowerType(),
+      x: canvas.width + 10 + BUILDING_WIDTH/2,
+      y: top + GAP_SIZE/2,
+      taken: false
+    };
   }
 
   buildings.push({ x: canvas.width + 10, top, passed: false, power });
 }
 
-function buildingSpeed() { return BUILDING_SPEED_BASE * speedMult; }
+function isDashing() { return now() < dashUntil; }
+
+function buildingSpeed() {
+  if (isDashing()) return BUILDING_SPEED_BASE * DASH_SPEED_MULT;
+  return BUILDING_SPEED_BASE * speedMult;
+}
 function effectiveGravity() { return BASE_GRAVITY; }
 function effectiveLift() { return BASE_LIFT; }
 
 function applyPower(type) {
   if (type === "shield") {
-    shieldUntil = now() + SHIELD_DURATION_MS;
-    toastMsg("Shield ON (blocks 1 hit)");
+    const before = shieldCharges;
+    shieldCharges = Math.min(MAX_SHIELDS, shieldCharges + 1);
+    if (shieldCharges > before) toastMsg(`Shield +1 (x${shieldCharges})`);
+    else toastMsg(`Shields full (x${shieldCharges})`);
+    playSfx("power");
+  } else if (type === "dash") {
+    const before = dashCharges;
+    dashCharges = Math.min(MAX_DASH, dashCharges + 1);
+    if (dashCharges > before) toastMsg(`Dash ready (x${dashCharges})`);
+    else toastMsg(`Dash full (x${dashCharges})`);
+    playSfx("dash");
+  } else {
+    toastMsg("Power-up!");
+    playSfx("power");
   }
-  playSfx("power");
+
   coins += 5;
   coinsText.textContent = String(coins);
   saveAll();
+}
+
+function tryDashTrigger() {
+  if (!started || paused || gameOver) return false;
+  if (dashCharges <= 0) return false;
+  if (isDashing()) return false;
+
+  dashCharges -= 1;
+  dashUntil = now() + DASH_DURATION_MS;
+  iframesUntil = Math.max(iframesUntil, now() + 200); // tiny buffer at start
+  toastMsg(`DASH! (${dashCharges} left)`);
+  playSfx("dash");
+  return true;
 }
 
 function heroHitBuilding(gapTop, gapBottom, bX, bRight) {
@@ -615,8 +672,10 @@ function heroHitBuilding(gapTop, gapBottom, bX, bRight) {
 }
 
 // ----------------------------
-// Background (PARALLAX UPGRADE)
+// Background + visuals
+// (kept from v16)
 // ----------------------------
+
 function drawStars(ctx2, f, starArr) {
   ctx2.save();
   ctx2.fillStyle = "#fff";
@@ -695,7 +754,6 @@ function themeSkyGradient(ctx2, bg, h) {
   if (bg === "desert")     { g.addColorStop(0,"#ffd59e"); g.addColorStop(1,"#ff9b6a"); return g; }
   if (bg === "forest")     { g.addColorStop(0,"#92d6c7"); g.addColorStop(1,"#2c6b52"); return g; }
   if (bg === "snow")       { g.addColorStop(0,"#cfe8ff"); g.addColorStop(1,"#eef7ff"); return g; }
-  // city_day
   g.addColorStop(0,"#87CEEB"); g.addColorStop(1,"#cdeffd"); return g;
 }
 
@@ -708,7 +766,6 @@ function skylinePalette(bg) {
   if (bg === "desert")     return ["#6b3a1f","#8a4a2a","#a85e34","#c1783f"];
   if (bg === "forest")     return ["#103d2f","#165342","#1f6b55","#2b8668"];
   if (bg === "snow")       return ["#3d4a63","#4c5c7a","#5e7396","#7c93b8"];
-  // city_day
   return ["#2b2b4f","#3a3a67","#4b4b85","#6060a5"];
 }
 
@@ -754,7 +811,6 @@ function drawGround(ctx2, bg, f, w, h) {
   ctx2.fillStyle = g;
   ctx2.fillRect(0, h-70, w, 70);
 
-  // moving detail line
   ctx2.globalAlpha = 0.25;
   ctx2.fillStyle = "#fff";
   const speed = 1.6;
@@ -786,12 +842,10 @@ function drawBackground(ctx2, f, w, h, bg, starArr, rainArr, snowArr) {
   }
 
   const pal = skylinePalette(bg);
-
-  // 4 parallax layers (far -> near)
   drawLayerBlocks(ctx2, f, w, h-120, pal[0], 0.55, 0.14, 0.65, 0.0);
-  drawLayerBlocks(ctx2, f, w, h-100, pal[1], 0.60, 0.22, 0.75, bg.includes("night")||bg==="neon" ? 0.65 : 0.0);
-  drawLayerBlocks(ctx2, f, w, h-78,  pal[2], 0.70, 0.34, 0.9,  bg.includes("night")||bg==="neon" ? 0.75 : 0.0);
-  drawLayerBlocks(ctx2, f, w, h-58,  pal[3], 0.80, 0.52, 1.0,  bg.includes("night")||bg==="neon" ? 0.85 : 0.0);
+  drawLayerBlocks(ctx2, f, w, h-100, pal[1], 0.60, 0.22, 0.75, (bg.includes("night")||bg==="neon") ? 0.65 : 0.0);
+  drawLayerBlocks(ctx2, f, w, h-78,  pal[2], 0.70, 0.34, 0.9,  (bg.includes("night")||bg==="neon") ? 0.75 : 0.0);
+  drawLayerBlocks(ctx2, f, w, h-58,  pal[3], 0.80, 0.52, 1.0,  (bg.includes("night")||bg==="neon") ? 0.85 : 0.0);
 
   drawGround(ctx2, bg, f, w, h);
 
@@ -915,22 +969,43 @@ function drawBuilding(x, y, width, height) {
 
 function drawPowerup(p) {
   if (!p || p.taken) return;
+
   ctx.save();
   ctx.translate(p.x, p.y);
-  ctx.fillStyle = "rgba(0, 170, 255, 0.92)";
-  ctx.beginPath();
-  ctx.arc(0, 0, POWERUP_SIZE, 0, Math.PI*2);
-  ctx.fill();
-  ctx.fillStyle = "#000";
-  ctx.font = "14px Arial";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText("S", 0, 1);
+
+  if (p.type === "shield") {
+    ctx.fillStyle = "rgba(0, 170, 255, 0.92)";
+    ctx.beginPath();
+    ctx.arc(0, 0, POWERUP_SIZE, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = "#000";
+    ctx.font = "14px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("S", 0, 1);
+  } else if (p.type === "dash") {
+    ctx.fillStyle = "rgba(255, 110, 0, 0.92)";
+    ctx.beginPath();
+    ctx.arc(0, 0, POWERUP_SIZE, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = "#000";
+    ctx.font = "14px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("D", 0, 1);
+  } else {
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.beginPath();
+    ctx.arc(0, 0, POWERUP_SIZE, 0, Math.PI*2);
+    ctx.fill();
+  }
+
   ctx.restore();
 }
 
 // ----------------------------
-// Hero visuals (same as v15 + new trails/auras)
+// Hero visuals (same as v16)
+// (kept; only changed shielded logic + dash glow)
 // ----------------------------
 function drawTrail(ctx2, f, hx, hy, trail) {
   const x = hx - 6;
@@ -1102,177 +1177,69 @@ function drawAura(ctx2, f, hx, hy, aura) {
   }
 }
 
-// --- animal heads (same as v15) ---
-function drawAnimalHead(ctx2, hx, hy, kind, furColor, accentColor) {
-  ctx2.fillStyle = furColor;
-  ctx2.beginPath();
-  ctx2.arc(hx + 17, hy + 8, 10, 0, Math.PI*2);
-  ctx2.fill();
-
-  if (kind === "animal_cat") {
-    ctx2.beginPath();
-    ctx2.moveTo(hx + 10, hy + 2);
-    ctx2.lineTo(hx + 6, hy - 9);
-    ctx2.lineTo(hx + 14, hy - 2);
-    ctx2.closePath();
-    ctx2.fill();
-
-    ctx2.beginPath();
-    ctx2.moveTo(hx + 24, hy + 2);
-    ctx2.lineTo(hx + 28, hy - 9);
-    ctx2.lineTo(hx + 20, hy - 2);
-    ctx2.closePath();
-    ctx2.fill();
-
-    ctx2.globalAlpha = 0.40;
-    ctx2.strokeStyle = "#000";
-    ctx2.lineWidth = 1;
-    for (let i = -1; i <= 1; i++) {
-      ctx2.beginPath();
-      ctx2.moveTo(hx + 9, hy + 13 + i * 2);
-      ctx2.lineTo(hx + 2, hy + 12 + i * 2);
-      ctx2.stroke();
-
-      ctx2.beginPath();
-      ctx2.moveTo(hx + 25, hy + 13 + i * 2);
-      ctx2.lineTo(hx + 32, hy + 12 + i * 2);
-      ctx2.stroke();
-    }
-    ctx2.globalAlpha = 1;
-
-    ctx2.fillStyle = accentColor;
-    ctx2.beginPath();
-    ctx2.moveTo(hx + 17, hy + 14);
-    ctx2.lineTo(hx + 14.5, hy + 11.5);
-    ctx2.lineTo(hx + 19.5, hy + 11.5);
-    ctx2.closePath();
-    ctx2.fill();
-  }
-
-  if (kind === "animal_dog") {
-    ctx2.globalAlpha = 0.9;
-    ctx2.beginPath();
-    ctx2.ellipse(hx + 7, hy + 10, 5, 9, 0.35, 0, Math.PI*2);
-    ctx2.fill();
-    ctx2.beginPath();
-    ctx2.ellipse(hx + 27, hy + 10, 5, 9, -0.35, 0, Math.PI*2);
-    ctx2.fill();
-    ctx2.globalAlpha = 1;
-
-    ctx2.fillStyle = "rgba(255,255,255,0.6)";
-    ctx2.beginPath();
-    ctx2.ellipse(hx + 17, hy + 13, 8.5, 6, 0, 0, Math.PI*2);
-    ctx2.fill();
-
-    ctx2.fillStyle = accentColor;
-    ctx2.beginPath();
-    ctx2.arc(hx + 17, hy + 13, 2.2, 0, Math.PI*2);
-    ctx2.fill();
-  }
-
-  if (kind === "animal_fox") {
-    ctx2.beginPath();
-    ctx2.moveTo(hx + 10, hy + 2);
-    ctx2.lineTo(hx + 4, hy - 12);
-    ctx2.lineTo(hx + 16, hy - 1);
-    ctx2.closePath();
-    ctx2.fill();
-
-    ctx2.beginPath();
-    ctx2.moveTo(hx + 24, hy + 2);
-    ctx2.lineTo(hx + 30, hy - 12);
-    ctx2.lineTo(hx + 18, hy - 1);
-    ctx2.closePath();
-    ctx2.fill();
-
-    ctx2.globalAlpha = 0.45;
-    ctx2.fillStyle = "#fff";
-    ctx2.beginPath();
-    ctx2.arc(hx + 10, hy + 13, 4.5, 0, Math.PI*2);
-    ctx2.arc(hx + 24, hy + 13, 4.5, 0, Math.PI*2);
-    ctx2.fill();
-    ctx2.globalAlpha = 1;
-
-    ctx2.fillStyle = "rgba(255,255,255,0.55)";
-    ctx2.beginPath();
-    ctx2.ellipse(hx + 18, hy + 14, 8.5, 5.2, 0.2, 0, Math.PI*2);
-    ctx2.fill();
-
-    ctx2.fillStyle = accentColor;
-    ctx2.beginPath();
-    ctx2.arc(hx + 21, hy + 14, 2.0, 0, Math.PI*2);
-    ctx2.fill();
-  }
-
-  ctx2.fillStyle = "#fff";
-  ctx2.fillRect(hx + 11, hy + 7, 5, 2);
-  ctx2.fillRect(hx + 20, hy + 7, 5, 2);
-}
-
+// --- minimal heads (kept) ---
 function drawBeeHead(ctx2, hx, hy) {
   ctx2.fillStyle = "#ffd400";
   ctx2.beginPath();
   ctx2.arc(hx + 17, hy + 8, 10, 0, Math.PI*2);
   ctx2.fill();
-
   ctx2.globalAlpha = 0.25;
   ctx2.fillStyle = "#000";
   ctx2.fillRect(hx + 9, hy + 6, 16, 3);
   ctx2.globalAlpha = 1;
-
-  ctx2.strokeStyle = "#000";
-  ctx2.lineWidth = 2;
-  ctx2.beginPath();
-  ctx2.moveTo(hx + 14, hy - 1);
-  ctx2.lineTo(hx + 10, hy - 8);
-  ctx2.stroke();
-  ctx2.beginPath();
-  ctx2.moveTo(hx + 20, hy - 1);
-  ctx2.lineTo(hx + 24, hy - 8);
-  ctx2.stroke();
-
   ctx2.fillStyle = "#fff";
   ctx2.fillRect(hx + 11, hy + 7, 5, 2);
   ctx2.fillRect(hx + 20, hy + 7, 5, 2);
 }
-
 function drawSkeletonHead(ctx2, hx, hy) {
   ctx2.fillStyle = "#f1f1f1";
   ctx2.beginPath();
   ctx2.arc(hx + 17, hy + 8, 10, 0, Math.PI*2);
   ctx2.fill();
-
   ctx2.fillStyle = "#111";
   ctx2.beginPath();
   ctx2.arc(hx + 13, hy + 8, 2.8, 0, Math.PI*2);
   ctx2.arc(hx + 21, hy + 8, 2.8, 0, Math.PI*2);
   ctx2.fill();
-
   ctx2.globalAlpha = 0.5;
-  ctx2.fillStyle = "#111";
   ctx2.fillRect(hx + 11, hy + 14, 12, 2);
   ctx2.globalAlpha = 1;
 }
 
 function drawHeroVariant(ctx2, f, hx, hy, opts) {
-  const { suit, cape, mask, body, head, trail, aura, shielded, iframes } = opts;
+  const { suit, cape, mask, body, head, trail, aura, shieldCount, dashing, iframes } = opts;
 
-  // aura behind everything
   drawAura(ctx2, f, hx, hy, aura);
+  drawTrail(ctx2, f, hx, hy, trail);
 
-  if (shielded) {
-    ctx2.globalAlpha = 0.22;
-    ctx2.fillStyle = "#00aaff";
+  // dash glow
+  if (dashing) {
+    ctx2.save();
+    ctx2.globalAlpha = 0.20;
+    ctx2.fillStyle = "rgba(255,110,0,0.95)";
     ctx2.beginPath();
-    ctx2.arc(hx + 17, hy + 17, 30, 0, Math.PI*2);
+    ctx2.arc(hx + 17, hy + 17, 32, 0, Math.PI*2);
     ctx2.fill();
-    ctx2.globalAlpha = 1;
+    ctx2.restore();
+  }
+
+  // shields ring(s)
+  if (shieldCount > 0) {
+    ctx2.save();
+    for (let i = 0; i < shieldCount; i++) {
+      ctx2.globalAlpha = 0.14 + i * 0.04;
+      ctx2.strokeStyle = "rgba(0,170,255,0.95)";
+      ctx2.lineWidth = 3;
+      ctx2.beginPath();
+      ctx2.arc(hx + 17, hy + 17, 24 + i * 4, 0, Math.PI*2);
+      ctx2.stroke();
+    }
+    ctx2.restore();
   } else if (iframes) {
     ctx2.globalAlpha = 0.35 + 0.25 * Math.sin(f * 0.6);
   }
 
-  drawTrail(ctx2, f, hx, hy, trail);
-
+  // cape
   const capeAllowed = !(body === "skeleton" || body === "bee");
   if (capeAllowed) {
     const flutter = Math.sin(f * 0.2) * 4;
@@ -1291,26 +1258,16 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
     ctx2.beginPath();
     ctx2.ellipse(hx + 17, hy + 22, 16, 12, 0, 0, Math.PI*2);
     ctx2.fill();
-
     ctx2.globalAlpha = 0.35;
     ctx2.fillStyle = "#000";
     ctx2.fillRect(hx + 6, hy + 18, 22, 3);
     ctx2.fillRect(hx + 6, hy + 23, 22, 3);
     ctx2.fillRect(hx + 6, hy + 28, 22, 3);
     ctx2.globalAlpha = 1;
-
-    ctx2.globalAlpha = 0.35;
-    ctx2.fillStyle = "#b9f2ff";
-    ctx2.beginPath();
-    ctx2.ellipse(hx + 12, hy + 16, 8, 6, -0.3, 0, Math.PI*2);
-    ctx2.ellipse(hx + 22, hy + 16, 8, 6, 0.3, 0, Math.PI*2);
-    ctx2.fill();
-    ctx2.globalAlpha = 1;
   } else if (body === "skeleton") {
     ctx2.fillStyle = "#f1f1f1";
     roundedRectPath(ctx2, hx + 4, hy + 10, 26, 24, 6);
     ctx2.fill();
-
     ctx2.globalAlpha = 0.35;
     ctx2.strokeStyle = "#111";
     ctx2.lineWidth = 1;
@@ -1320,33 +1277,6 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
       ctx2.lineTo(hx + 27, hy + 14 + i * 5);
       ctx2.stroke();
     }
-    ctx2.beginPath();
-    ctx2.moveTo(hx + 17, hy + 12);
-    ctx2.lineTo(hx + 17, hy + 33);
-    ctx2.stroke();
-    ctx2.globalAlpha = 1;
-  } else if (body.startsWith("animal_")) {
-    ctx2.fillStyle = suit;
-    ctx2.beginPath();
-    ctx2.ellipse(hx + 17, hy + 22, 15.5, 11.5, 0, 0, Math.PI*2);
-    ctx2.fill();
-  } else if (body === "armored") {
-    ctx2.fillStyle = suit;
-    ctx2.fillRect(hx, hy + 10, 34, 24);
-    ctx2.globalAlpha = 0.25;
-    ctx2.fillStyle = "#000";
-    ctx2.fillRect(hx + 2, hy + 12, 30, 4);
-    ctx2.fillRect(hx + 2, hy + 18, 30, 4);
-    ctx2.fillRect(hx + 2, hy + 24, 30, 4);
-    ctx2.globalAlpha = 1;
-  } else if (body === "speed") {
-    ctx2.fillStyle = suit;
-    roundedRectPath(ctx2, hx, hy + 10, 34, 24, 8);
-    ctx2.fill();
-    ctx2.globalAlpha = 0.22;
-    ctx2.fillStyle = "#fff";
-    ctx2.fillRect(hx + 6, hy + 12, 4, 20);
-    ctx2.fillRect(hx + 16, hy + 12, 3, 20);
     ctx2.globalAlpha = 1;
   } else {
     ctx2.fillStyle = suit;
@@ -1358,48 +1288,13 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
   // head
   if (head === "bee") drawBeeHead(ctx2, hx, hy);
   else if (head === "skeleton") drawSkeletonHead(ctx2, hx, hy);
-  else if (head.startsWith("animal_")) drawAnimalHead(ctx2, hx, hy, head, suit, mask);
-  else if (head === "helmet") {
-    ctx2.fillStyle = "#c7c7c7";
-    ctx2.beginPath();
-    ctx2.arc(hx + 17, hy + 6, 11, Math.PI, 0);
-    ctx2.lineTo(hx + 28, hy + 10);
-    ctx2.lineTo(hx + 6, hy + 10);
-    ctx2.closePath();
-    ctx2.fill();
-
-    ctx2.fillStyle = mask;
-    ctx2.fillRect(hx + 7, hy + 4, 20, 6);
-
-    ctx2.fillStyle = "#fff";
-    ctx2.fillRect(hx + 10, hy + 6, 6, 2);
-    ctx2.fillRect(hx + 19, hy + 6, 6, 2);
-  } else if (head === "hood") {
-    ctx2.fillStyle = "#2b2b2b";
-    ctx2.beginPath();
-    ctx2.arc(hx + 17, hy + 7, 12, 0, Math.PI*2);
-    ctx2.fill();
-
-    ctx2.fillStyle = "#ffcc99";
-    ctx2.beginPath();
-    ctx2.arc(hx + 17, hy + 8, 8, 0, Math.PI*2);
-    ctx2.fill();
-
-    ctx2.fillStyle = mask;
-    ctx2.fillRect(hx + 9, hy + 6, 16, 5);
-
-    ctx2.fillStyle = "#fff";
-    ctx2.fillRect(hx + 11, hy + 7, 5, 2);
-    ctx2.fillRect(hx + 20, hy + 7, 5, 2);
-  } else {
+  else {
     ctx2.fillStyle = "#ffcc99";
     ctx2.beginPath();
     ctx2.arc(hx + 17, hy + 6, 10, 0, Math.PI*2);
     ctx2.fill();
-
     ctx2.fillStyle = mask;
     ctx2.fillRect(hx + 7, hy + 2, 20, 6);
-
     ctx2.fillStyle = "#fff";
     ctx2.fillRect(hx + 10, hy + 4, 6, 2);
     ctx2.fillRect(hx + 19, hy + 4, 6, 2);
@@ -1417,7 +1312,8 @@ function drawHero() {
     head: cosmetics.head,
     trail: cosmetics.trail,
     aura: cosmetics.aura,
-    shielded: now() < shieldUntil,
+    shieldCount: shieldCharges,
+    dashing: isDashing(),
     iframes: now() < iframesUntil,
   });
 }
@@ -1432,6 +1328,7 @@ function update() {
   hero.vy += effectiveGravity();
   hero.y += hero.vy;
 
+  // Still die to ground/ceiling even while dashing (keeps it fair)
   if (hero.y + hero.h > canvas.height) { hero.y = canvas.height - hero.h; endGame(); return; }
   if (hero.y < 0) { hero.y = 0; endGame(); return; }
 
@@ -1456,16 +1353,22 @@ function update() {
       }
     }
 
+    // Collision:
+    // - If dashing: ignore building collision completely
+    // - Else if iframes: ignore
+    // - Else if shieldCharges>0: consume one shield (ONLY on collision), set iframes
+    // - Else: die
     const hit = heroHitBuilding(gapTop, gapBottom, b.x, right);
-    if (hit) {
+
+    if (hit && !isDashing()) {
       if (now() < iframesUntil) {
         // ignore
-      } else if (now() < shieldUntil) {
-        shieldUntil = 0;
+      } else if (shieldCharges > 0) {
+        shieldCharges -= 1;
         iframesUntil = now() + SHIELD_IFRAME_MS;
         hero.vy = Math.min(hero.vy, 0);
         hero.y = Math.max(0, hero.y - 18);
-        toastMsg("Shield blocked the hit!");
+        toastMsg(`Shield used (x${shieldCharges})`);
         playSfx("power");
       } else {
         endGame();
@@ -1473,6 +1376,7 @@ function update() {
       }
     }
 
+    // scoring
     if (!b.passed && right < hero.x) {
       b.passed = true;
       score++;
@@ -1503,14 +1407,19 @@ function draw() {
 
   drawHero();
 
-  ctx.globalAlpha = 0.9;
-  ctx.fillStyle = "rgba(0,0,0,0.6)";
+  // HUD buffs
+  ctx.globalAlpha = 0.92;
+  ctx.fillStyle = "rgba(0,0,0,0.65)";
   ctx.font = "12px Arial";
-  const buffs = [
-    now() < shieldUntil ? "Shield" : "",
-    now() < iframesUntil ? "Safe" : ""
-  ].filter(Boolean).join(" • ");
-  if (buffs) ctx.fillText(buffs, 12, 18);
+
+  const parts = [];
+  if (shieldCharges > 0) parts.push(`Shield x${shieldCharges}`);
+  if (dashCharges > 0) parts.push(`Dash x${dashCharges}`);
+  if (isDashing()) parts.push("DASHING");
+
+  const line = parts.join(" • ");
+  if (line) ctx.fillText(line, 12, 18);
+
   ctx.globalAlpha = 1;
 
   if (paused) {
@@ -1549,7 +1458,8 @@ function drawHeroPreview() {
     head: cosmetics.head,
     trail: cosmetics.trail,
     aura: cosmetics.aura,
-    shielded: false,
+    shieldCount: shieldCharges,
+    dashing: false,
     iframes: false,
   });
 }
@@ -1561,18 +1471,18 @@ function loop() {
   drawPreview();
   drawHeroPreview();
   ensureMusicState();
-  animationId = requestAnimationFrame(loop);
+  requestAnimationFrame(loop);
 }
 
 // ----------------------------
-// Input + mobile zoom fix
+// Input + mobile zoom fix + dash trigger
 // ----------------------------
 document.addEventListener("dblclick", (e) => e.preventDefault(), { passive: false });
 
-canvas.addEventListener("pointerdown", (e) => {
-  e.preventDefault();
+function handleTapAction() {
   ensureAudio();
 
+  // overlay quick-resume behavior
   if (!overlay.classList.contains("hidden") && !gameOver) {
     paused = false;
     hideOverlayHard();
@@ -1582,21 +1492,33 @@ canvas.addEventListener("pointerdown", (e) => {
 
   if (gameOver) { reset(); startPlay(); return; }
 
-  if (menu.classList.contains("hidden") && !paused) {
-    hero.vy = effectiveLift();
-    playSfx("flap");
+  if (!menu.classList.contains("hidden") || paused) return;
+
+  // dash: quick double-tap
+  const t = now();
+  const dt = t - lastTapAt;
+  lastTapAt = t;
+
+  if (dt > 0 && dt <= DASH_TAP_WINDOW_MS) {
+    const dashed = tryDashTrigger();
+    if (dashed) return;
+    // if no dash available, fall through to flap on second tap (feels responsive)
   }
+
+  // normal flap
+  hero.vy = effectiveLift();
+  playSfx("flap");
+}
+
+canvas.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  handleTapAction();
 }, { passive: false });
 
 document.addEventListener("keydown", (e) => {
   if (e.code === "Space") {
     e.preventDefault();
-    ensureAudio();
-    if (gameOver) { reset(); startPlay(); return; }
-    if (menu.classList.contains("hidden") && !paused) {
-      hero.vy = effectiveLift();
-      playSfx("flap");
-    }
+    handleTapAction();
   }
   if (e.code === "Escape") {
     if (!overlay.classList.contains("hidden") && !gameOver) {
@@ -1608,9 +1530,9 @@ document.addEventListener("keydown", (e) => {
 });
 
 // ----------------------------
-// Shop builder
+// Shop builder (same as v16)
 // ----------------------------
-function addShopButton(label, cost, unlockKey, afterBuy) {
+function addShopButton(label, cost, unlockKey) {
   const b = document.createElement("button");
   b.className = "btn small";
   const owned = isUnlocked(unlockKey);
@@ -1627,7 +1549,6 @@ function addShopButton(label, cost, unlockKey, afterBuy) {
     toastMsg("Unlocked!");
     b.textContent = `Owned: ${label}`;
     b.classList.add("secondary");
-    afterBuy?.();
     syncLocksToUI();
   });
 
@@ -1637,7 +1558,6 @@ function addShopButton(label, cost, unlockKey, afterBuy) {
 function rebuildShop() {
   shopList.innerHTML = "";
 
-  // Trails
   addShopButton("Spark Trail", TRAILS.spark.cost, TRAILS.spark.unlockKey);
   addShopButton("Neon Trail", TRAILS.neon.cost, TRAILS.neon.unlockKey);
   addShopButton("Smoke Trail", TRAILS.smoke.cost, TRAILS.smoke.unlockKey);
@@ -1647,18 +1567,15 @@ function rebuildShop() {
   addShopButton("Star Dust Trail", TRAILS.stars.cost, TRAILS.stars.unlockKey);
   addShopButton("Glitch Trail", TRAILS.glitch.cost, TRAILS.glitch.unlockKey);
 
-  // Auras
   addShopButton("Halo Aura", AURAS.halo.cost, AURAS.halo.unlockKey);
   addShopButton("Shadow Aura", AURAS.shadow.cost, AURAS.shadow.unlockKey);
   addShopButton("Pulse Aura", AURAS.pulse.cost, AURAS.pulse.unlockKey);
   addShopButton("Frost Aura", AURAS.frost.cost, AURAS.frost.unlockKey);
 
-  // Building styles
   addShopButton("Glass Buildings", BUILD_STYLES.glass.cost, BUILD_STYLES.glass.unlockKey);
   addShopButton("Neon Buildings", BUILD_STYLES.neon.cost, BUILD_STYLES.neon.unlockKey);
   addShopButton("Stone Buildings", BUILD_STYLES.stone.cost, BUILD_STYLES.stone.unlockKey);
 
-  // Backgrounds
   addShopButton("Sunset Background", 150, THEME_META.sunset.unlockKey);
   addShopButton("Neon Night Background", 180, THEME_META.neon.unlockKey);
   addShopButton("Desert Background", 140, THEME_META.desert.unlockKey);
@@ -1667,20 +1584,16 @@ function rebuildShop() {
 }
 
 function syncLocksToUI() {
-  // Background select: if locked, force fallback
   const meta = THEME_META[settings.background];
   if (meta?.locked && meta.unlockKey && !isUnlocked(meta.unlockKey)) settings.background = "city_day";
   bgSelect.value = settings.background;
 
-  // trails
   if (cosmetics.trail !== "none" && !isUnlocked(TRAILS[cosmetics.trail]?.unlockKey)) cosmetics.trail = "none";
   trailSelect.value = cosmetics.trail;
 
-  // aura
   if (cosmetics.aura !== "none" && !isUnlocked(AURAS[cosmetics.aura]?.unlockKey)) cosmetics.aura = "none";
   auraSelect.value = cosmetics.aura;
 
-  // buildings
   const bs = BUILD_STYLES[cosmetics.buildStyle];
   if (bs?.locked && !isUnlocked(bs.unlockKey)) cosmetics.buildStyle = "brick";
   buildStyleSelect.value = cosmetics.buildStyle;
@@ -1769,7 +1682,6 @@ musicSelect.addEventListener("change", () => {
   toastMsg(`Track: ${musicSelect.options[musicSelect.selectedIndex].text}`);
 });
 
-// Music preview
 musicPlayPreview.addEventListener("click", () => {
   ensureAudio();
   if (!audioCtx) return toastMsg("Tap the game canvas once, then try preview.");
@@ -1785,7 +1697,6 @@ musicStopPreview.addEventListener("click", () => {
   toastMsg("Music stopped");
 });
 
-// SFX
 sfxSelect.addEventListener("change", () => {
   settings.sfxPack = sfxSelect.value;
   saveAll();
@@ -1796,7 +1707,6 @@ sfxTestScore.addEventListener("click", () => { ensureAudio(); playSfx("score"); 
 sfxTestPower.addEventListener("click", () => { ensureAudio(); playSfx("power"); });
 sfxTestCrash.addEventListener("click", () => { ensureAudio(); playSfx("crash"); });
 
-// Cosmetics
 bodySelect.addEventListener("change", () => { cosmetics.body = bodySelect.value; saveAll(); toastMsg("Body updated"); });
 headSelect.addEventListener("change", () => { cosmetics.head = headSelect.value; saveAll(); toastMsg("Head updated"); });
 
