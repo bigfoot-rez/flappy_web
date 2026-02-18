@@ -1,9 +1,9 @@
 // ============================
 // SKY HERO DASH
-// v18: FIX head/body switching (auto-filled selects) + more bodies/heads + more music tracks
+// v19: Fix unlockables selectable after purchase (trail/aura/buildings). Everything else unchanged.
 // ============================
 
-const APP_VERSION = "v18";
+const APP_VERSION = "v19";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -90,7 +90,7 @@ const LS = {
 };
 
 // ----------------------------
-// DEFINITIONS (single source of truth)
+// Definitions
 // ----------------------------
 const BODY_OPTIONS = [
   ["classic", "Classic"],
@@ -168,19 +168,16 @@ const BUILDING_WIDTH = 64;
 const GAP_SIZE = 170;
 const SPAWN_EVERY_FRAMES = 90;
 
-// powerups
 const POWERUP_CHANCE = 0.28;
 const POWERUP_SIZE = 18;
 const DASH_PICKUP_WEIGHT = 0.45;
 const MAX_SHIELDS = 3;
 const MAX_DASH = 2;
 
-// dash behavior
 const DASH_DURATION_MS = 750;
 const DASH_SPEED_MULT = 3.15;
 const DASH_TAP_WINDOW_MS = 230;
 
-// Invuln after shield hit
 const SHIELD_IFRAME_MS = 950;
 
 // Particles
@@ -191,9 +188,7 @@ let previewRainDrops = [];
 let previewStars = [];
 let previewSnow = [];
 
-// ----------------------------
 // State
-// ----------------------------
 let hero, buildings, score, best, gameOver, started, paused;
 let frame = 0;
 let speedMult = 1;
@@ -276,7 +271,6 @@ function loadAll() {
   unlocks = { ...unlocks, ...loadJSON(LS.unlocks, {}) };
   coins = Math.max(0, Number(localStorage.getItem(LS.coins) || "0"));
 
-  // clamp known values
   const bgOK = new Set(Object.keys(THEME_META));
   if (!bgOK.has(settings.background)) settings.background = "city_day";
 
@@ -325,9 +319,7 @@ function promptName() {
   renderLocalBoard();
 }
 
-// ----------------------------
 // Local leaderboard
-// ----------------------------
 function loadLocalBoard() {
   try {
     const raw = localStorage.getItem(LS.localBoard);
@@ -362,9 +354,7 @@ function renderLocalBoard() {
   }
 }
 
-// ----------------------------
 // Rounded rect helper
-// ----------------------------
 function roundedRectPath(ctx2, x, y, w, h, r) {
   const rr = Math.max(0, Math.min(r, Math.min(w, h) / 2));
   ctx2.beginPath();
@@ -377,7 +367,7 @@ function roundedRectPath(ctx2, x, y, w, h, r) {
 }
 
 // ----------------------------
-// Audio (simple synth)
+// Audio
 // ----------------------------
 let audioCtx = null;
 let musicTimer = null;
@@ -425,7 +415,6 @@ function sfxParams(kind) {
     if (kind === "dash")  return { f: 1180,d: 110, t: "square",   g: 0.06 };
     return                { f: 110, d: 220, t: "sawtooth", g: 0.07 };
   }
-  // robot
   if (kind === "flap")  return { f: 300, d: 55,  t: "square", g: 0.06 };
   if (kind === "score") return { f: 460, d: 75,  t: "square", g: 0.06 };
   if (kind === "power") return { f: 620, d: 120, t: "square", g: 0.06 };
@@ -441,7 +430,6 @@ function playSfx(kind) {
   oscNote(p.f, p.d, p.t, p.g);
 }
 
-// NEW tracks
 const MUSIC = {
   none:   { bpm: 0,   steps: [], type:"sine", gain:0 },
 
@@ -562,6 +550,78 @@ overlay.addEventListener("pointerdown", (e) => {
 }, { passive: true });
 
 // ----------------------------
+// v19 FIX: Unlockables selection handlers
+// ----------------------------
+function applyTrailSelection(selected) {
+  if (selected === "none") {
+    cosmetics.trail = "none";
+    saveAll();
+    toastMsg("Trail: None");
+    return;
+  }
+  const meta = TRAILS[selected];
+  if (!meta) {
+    cosmetics.trail = "none";
+    trailSelect.value = "none";
+    saveAll();
+    toastMsg("Trail reset");
+    return;
+  }
+  if (!isUnlocked(meta.unlockKey)) {
+    toastMsg("That trail is locked (buy it in Shop).");
+    trailSelect.value = cosmetics.trail;
+    return;
+  }
+  cosmetics.trail = selected;
+  saveAll();
+  toastMsg(`Trail: ${meta.label}`);
+}
+
+function applyAuraSelection(selected) {
+  if (selected === "none") {
+    cosmetics.aura = "none";
+    saveAll();
+    toastMsg("Aura: None");
+    return;
+  }
+  const meta = AURAS[selected];
+  if (!meta) {
+    cosmetics.aura = "none";
+    auraSelect.value = "none";
+    saveAll();
+    toastMsg("Aura reset");
+    return;
+  }
+  if (!isUnlocked(meta.unlockKey)) {
+    toastMsg("That aura is locked (buy it in Shop).");
+    auraSelect.value = cosmetics.aura;
+    return;
+  }
+  cosmetics.aura = selected;
+  saveAll();
+  toastMsg(`Aura: ${meta.label}`);
+}
+
+function applyBuildStyleSelection(selected) {
+  const meta = BUILD_STYLES[selected];
+  if (!meta) {
+    cosmetics.buildStyle = "brick";
+    buildStyleSelect.value = "brick";
+    saveAll();
+    toastMsg("Buildings: Brick");
+    return;
+  }
+  if (meta.locked && !isUnlocked(meta.unlockKey)) {
+    toastMsg("That building style is locked (buy it in Shop).");
+    buildStyleSelect.value = cosmetics.buildStyle;
+    return;
+  }
+  cosmetics.buildStyle = selected;
+  saveAll();
+  toastMsg(`Buildings: ${meta.label}`);
+}
+
+// ----------------------------
 // Game lifecycle
 // ----------------------------
 function initGame() {
@@ -650,9 +710,7 @@ function endGame() {
   submitLocalScore(name, score);
 }
 
-// ----------------------------
 // Buildings + powerups
-// ----------------------------
 function choosePowerType() {
   const w = (score < 6) ? Math.max(0.25, DASH_PICKUP_WEIGHT - 0.15) : DASH_PICKUP_WEIGHT;
   return (Math.random() < w) ? "dash" : "shield";
@@ -678,8 +736,6 @@ function buildingSpeed() {
   if (isDashing()) return BUILDING_SPEED_BASE * DASH_SPEED_MULT;
   return BUILDING_SPEED_BASE * speedMult;
 }
-function effectiveGravity() { return BASE_GRAVITY; }
-function effectiveLift() { return BASE_LIFT; }
 
 function applyPower(type) {
   if (type === "shield") {
@@ -724,7 +780,7 @@ function heroHitBuilding(gapTop, gapBottom, bX, bRight) {
 }
 
 // ----------------------------
-// Background + buildings visuals (same as your v16/v17 vibe)
+// Background + buildings visuals
 // ----------------------------
 function drawStars(ctx2, f, starArr) {
   ctx2.save();
@@ -1048,7 +1104,7 @@ function drawPowerup(p) {
 }
 
 // ----------------------------
-// Hero visuals (FULL: animals + new bodies/heads)
+// Hero visuals (kept from your current build)
 // ----------------------------
 function drawTrail(ctx2, f, hx, hy, trail) {
   const x = hx - 6;
@@ -1220,7 +1276,7 @@ function drawAura(ctx2, f, hx, hy, aura) {
   }
 }
 
-// Animal head (distinct)
+// (Animal heads / bee / skeleton / robot + body variants)
 function drawAnimalHead(ctx2, hx, hy, kind, furColor, accentColor) {
   ctx2.fillStyle = furColor;
   ctx2.beginPath();
@@ -1228,7 +1284,6 @@ function drawAnimalHead(ctx2, hx, hy, kind, furColor, accentColor) {
   ctx2.fill();
 
   if (kind === "animal_cat") {
-    // pointy ears + whiskers
     ctx2.beginPath();
     ctx2.moveTo(hx + 10, hy + 2);
     ctx2.lineTo(hx + 6, hy - 9);
@@ -1269,7 +1324,6 @@ function drawAnimalHead(ctx2, hx, hy, kind, furColor, accentColor) {
   }
 
   if (kind === "animal_dog") {
-    // floppy ears
     ctx2.globalAlpha = 0.9;
     ctx2.beginPath();
     ctx2.ellipse(hx + 7, hy + 10, 5, 9, 0.35, 0, Math.PI*2);
@@ -1279,7 +1333,6 @@ function drawAnimalHead(ctx2, hx, hy, kind, furColor, accentColor) {
     ctx2.fill();
     ctx2.globalAlpha = 1;
 
-    // muzzle
     ctx2.fillStyle = "rgba(255,255,255,0.6)";
     ctx2.beginPath();
     ctx2.ellipse(hx + 17, hy + 13, 8.5, 6, 0, 0, Math.PI*2);
@@ -1292,7 +1345,6 @@ function drawAnimalHead(ctx2, hx, hy, kind, furColor, accentColor) {
   }
 
   if (kind === "animal_fox") {
-    // taller ears + sharp muzzle
     ctx2.beginPath();
     ctx2.moveTo(hx + 10, hy + 2);
     ctx2.lineTo(hx + 4, hy - 12);
@@ -1327,7 +1379,6 @@ function drawAnimalHead(ctx2, hx, hy, kind, furColor, accentColor) {
   }
 
   if (kind === "animal_owl") {
-    // big eyes + little beak
     ctx2.fillStyle = "rgba(255,255,255,0.75)";
     ctx2.beginPath();
     ctx2.arc(hx + 12, hy + 9, 4.8, 0, Math.PI*2);
@@ -1349,7 +1400,6 @@ function drawAnimalHead(ctx2, hx, hy, kind, furColor, accentColor) {
     ctx2.fill();
   }
 
-  // eye highlights
   ctx2.fillStyle = "#fff";
   ctx2.fillRect(hx + 11, hy + 7, 5, 2);
   ctx2.fillRect(hx + 20, hy + 7, 5, 2);
@@ -1386,7 +1436,7 @@ function drawSkeletonHead(ctx2, hx, hy) {
   ctx2.globalAlpha = 1;
 }
 
-function drawRobotHead(ctx2, hx, hy, maskColor) {
+function drawRobotHead(ctx2, hx, hy, maskColor2) {
   ctx2.fillStyle = "#b9c7d6";
   roundedRectPath(ctx2, hx + 6, hy - 2, 22, 20, 6);
   ctx2.fill();
@@ -1396,7 +1446,7 @@ function drawRobotHead(ctx2, hx, hy, maskColor) {
   ctx2.fillRect(hx + 8, hy + 1, 18, 4);
   ctx2.globalAlpha = 1;
 
-  ctx2.fillStyle = maskColor;
+  ctx2.fillStyle = maskColor2;
   ctx2.fillRect(hx + 9, hy + 7, 16, 6);
 
   ctx2.fillStyle = "#fff";
@@ -1435,7 +1485,6 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
     ctx2.globalAlpha = 0.35 + 0.25 * Math.sin(f * 0.6);
   }
 
-  // cape rules
   const capeAllowed = !(body === "skeleton" || body === "bee" || body === "drone");
   if (capeAllowed) {
     const flutter = Math.sin(f * 0.2) * 4;
@@ -1448,7 +1497,7 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
     ctx2.fill();
   }
 
-  // BODY
+  // body variants
   if (body === "bee") {
     ctx2.fillStyle = "#ffd400";
     ctx2.beginPath();
@@ -1461,7 +1510,6 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
     ctx2.fillRect(hx + 6, hy + 28, 22, 3);
     ctx2.globalAlpha = 1;
 
-    // wings
     ctx2.globalAlpha = 0.35;
     ctx2.fillStyle = "#b9f2ff";
     ctx2.beginPath();
@@ -1532,12 +1580,10 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
     roundedRectPath(ctx2, hx + 2, hy + 10, 30, 24, 8);
     ctx2.fill();
 
-    // pack
     ctx2.fillStyle = "#333";
     roundedRectPath(ctx2, hx - 3, hy + 14, 9, 16, 4);
     ctx2.fill();
 
-    // flame
     ctx2.globalAlpha = 0.75;
     ctx2.fillStyle = `rgba(255, ${150 + (frame%60)}, 40, 0.9)`;
     ctx2.beginPath();
@@ -1552,26 +1598,22 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
     roundedRectPath(ctx2, hx + 5, hy + 16, 24, 14, 7);
     ctx2.fill();
 
-    // rotors
     ctx2.globalAlpha = 0.25;
     ctx2.fillStyle = "#fff";
     ctx2.fillRect(hx + 1, hy + 10, 12, 2);
     ctx2.fillRect(hx + 21, hy + 10, 12, 2);
     ctx2.globalAlpha = 1;
 
-    // lights
     ctx2.fillStyle = "#ff3b3b";
     ctx2.fillRect(hx + 8, hy + 22, 4, 3);
     ctx2.fillStyle = "#00ffe0";
     ctx2.fillRect(hx + 22, hy + 22, 4, 3);
   } else if (body.startsWith("animal_")) {
-    // animal body = suit color as fur
     ctx2.fillStyle = suit;
     ctx2.beginPath();
     ctx2.ellipse(hx + 17, hy + 24, 16, 12, 0, 0, Math.PI*2);
     ctx2.fill();
 
-    // belly highlight
     ctx2.globalAlpha = 0.25;
     ctx2.fillStyle = "#fff";
     ctx2.beginPath();
@@ -1579,14 +1621,13 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
     ctx2.fill();
     ctx2.globalAlpha = 1;
   } else {
-    // classic
     ctx2.fillStyle = suit;
     ctx2.fillRect(hx, hy + 10, 34, 24);
     ctx2.fillStyle = "#ffd400";
     ctx2.fillRect(hx + 6, hy + 26, 22, 4);
   }
 
-  // HEAD
+  // head variants
   if (head === "bee") drawBeeHead(ctx2, hx, hy);
   else if (head === "skeleton") drawSkeletonHead(ctx2, hx, hy);
   else if (head === "robot") drawRobotHead(ctx2, hx, hy, mask);
@@ -1624,7 +1665,6 @@ function drawHeroVariant(ctx2, f, hx, hy, opts) {
     ctx2.fillRect(hx + 11, hy + 7, 5, 2);
     ctx2.fillRect(hx + 20, hy + 7, 5, 2);
   } else {
-    // classic head
     ctx2.fillStyle = "#ffcc99";
     ctx2.beginPath();
     ctx2.arc(hx + 17, hy + 6, 10, 0, Math.PI*2);
@@ -1738,7 +1778,6 @@ function draw() {
 
   drawHero();
 
-  // small HUD line
   ctx.globalAlpha = 0.92;
   ctx.fillStyle = "rgba(0,0,0,0.65)";
   ctx.font = "12px Arial";
@@ -1795,9 +1834,7 @@ function loop() {
   requestAnimationFrame(loop);
 }
 
-// ----------------------------
 // Input + dash trigger
-// ----------------------------
 document.addEventListener("dblclick", (e) => e.preventDefault(), { passive: false });
 
 function handleTapAction() {
@@ -1904,14 +1941,14 @@ function syncLocksToUI() {
   bgSelect.value = settings.background;
 
   if (cosmetics.trail !== "none" && !isUnlocked(TRAILS[cosmetics.trail]?.unlockKey)) cosmetics.trail = "none";
-  trailSelect.value = cosmetics.trail;
+  if (trailSelect) trailSelect.value = cosmetics.trail;
 
   if (cosmetics.aura !== "none" && !isUnlocked(AURAS[cosmetics.aura]?.unlockKey)) cosmetics.aura = "none";
-  auraSelect.value = cosmetics.aura;
+  if (auraSelect) auraSelect.value = cosmetics.aura;
 
   const bs = BUILD_STYLES[cosmetics.buildStyle];
   if (bs?.locked && !isUnlocked(bs.unlockKey)) cosmetics.buildStyle = "brick";
-  buildStyleSelect.value = cosmetics.buildStyle;
+  if (buildStyleSelect) buildStyleSelect.value = cosmetics.buildStyle;
 
   saveAll();
 }
@@ -2034,9 +2071,12 @@ suitColor.addEventListener("input", () => { cosmetics.suit = suitColor.value; sa
 capeColor.addEventListener("input", () => { cosmetics.cape = capeColor.value; saveAll(); });
 maskColor.addEventListener("input", () => { cosmetics.mask = maskColor.value; saveAll(); });
 
-// ----------------------------
+// v19: these were missing before — this is the unlockables selection fix
+if (trailSelect) trailSelect.addEventListener("change", () => applyTrailSelection(trailSelect.value));
+if (auraSelect) auraSelect.addEventListener("change", () => applyAuraSelection(auraSelect.value));
+if (buildStyleSelect) buildStyleSelect.addEventListener("change", () => applyBuildStyleSelection(buildStyleSelect.value));
+
 // Splash
-// ----------------------------
 function runSplash() {
   if (!splash || !splashFill) return;
   let pct = 0;
@@ -2050,9 +2090,7 @@ function runSplash() {
   }, 120);
 }
 
-// ----------------------------
 // Boot
-// ----------------------------
 (function boot() {
   if (versionText) versionText.textContent = APP_VERSION;
 
@@ -2062,12 +2100,9 @@ function runSplash() {
   const name = ensureName();
   playerNameText.textContent = name;
 
-  // Fill selects from JS (fixes your switching bug forever)
   setSelectOptions(bodySelect, BODY_OPTIONS, cosmetics.body, "classic");
   setSelectOptions(headSelect, HEAD_OPTIONS, cosmetics.head, "classic");
   setSelectOptions(musicSelect, MUSIC_OPTIONS, settings.music, "chill");
-
-  // Fill backgrounds (also from JS)
   setSelectOptions(bgSelect, Object.entries(THEME_META).map(([k,v]) => [k, v.label]), settings.background, "city_day");
 
   initRain(rainDrops, canvas.width, canvas.height);
