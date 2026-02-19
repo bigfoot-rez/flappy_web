@@ -3,7 +3,7 @@
 // v19: Fix unlockables selectable after purchase (trail/aura/buildings). Everything else unchanged.
 // ============================
 
-const APP_VERSION = "v23";
+const APP_VERSION = "v22";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -2136,12 +2136,4 @@ function runSplash() {
 
   initGame();
   loop();
-}
-
-// Allow name change from Settings for couch play
-(function hookSettingsName(){
-  const btn = document.getElementById("settingsChangeName");
-  if (btn) btn.addEventListener("click", () => promptName());
 })();
-
-)();

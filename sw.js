@@ -1,11 +1,11 @@
 /* Skybop Dash Service Worker (v22) */
-const CACHE = "skybopdash-v23";
+const CACHE = "skybopdash-v22";
 const CORE = [
   "./",
   "./index.html",
-  "./style.css?v=23",
-  "./game.js?v=23",
-  "./manifest.webmanifest?v=23",
+  "./style.css?v=22",
+  "./game.js?v=22",
+  "./manifest.webmanifest?v=22",
   "./icon.svg",
   "./icon-192.png",
   "./icon-512.png",
