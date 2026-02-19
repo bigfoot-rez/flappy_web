@@ -1,11 +1,11 @@
-/* Skybop Dash Service Worker (v21) */
-const CACHE = "skybopdash-v21";
+/* Skybop Dash Service Worker (v22) */
+const CACHE = "skybopdash-v22";
 const CORE = [
   "./",
   "./index.html",
-  "./style.css?v=21",
-  "./game.js?v=21",
-  "./manifest.webmanifest?v=21",
+  "./style.css?v=22",
+  "./game.js?v=22",
+  "./manifest.webmanifest?v=22",
   "./icon.svg",
   "./icon-192.png",
   "./icon-512.png",
@@ -30,6 +30,7 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
 
+  // Network-first for everything, cache fallback.
   event.respondWith(
     fetch(req)
       .then((res) => {

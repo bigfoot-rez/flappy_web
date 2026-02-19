@@ -1,9 +1,9 @@
 // ============================
-// SKY HERO DASH
+// SKYBOP DASH
 // v19: Fix unlockables selectable after purchase (trail/aura/buildings). Everything else unchanged.
 // ============================
 
-const APP_VERSION = "v20";
+const APP_VERSION = "v22";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
