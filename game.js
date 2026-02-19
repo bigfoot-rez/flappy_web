@@ -2479,3 +2479,202 @@ function runSplash() {
     }
   }, { passive: true });
 })();
+
+/* v27: VIP UI button + admin test mode (no HTML edits; safe injection) */
+(function v27VipUiInjected() {
+  if (window.__skybopVipUiInjected) return;
+  window.__skybopVipUiInjected = true;
+
+  const VIP_KEY = "skybop_vip";
+  const CONTINUE_KEY = "skybop_continues";
+  const ADMIN_KEY = "skybop_admin";
+
+  function isVIP() { return localStorage.getItem(VIP_KEY) === "true"; }
+  function isAdmin() { return localStorage.getItem(ADMIN_KEY) === "true"; }
+  function getContinues() { return parseInt(localStorage.getItem(CONTINUE_KEY) || "0", 10) || 0; }
+  function setContinues(n) { localStorage.setItem(CONTINUE_KEY, String(Math.max(0, n|0))); }
+  function addContinues(n) { setContinues(getContinues() + (n|0)); }
+
+  // Ensure continues key exists
+  if (!localStorage.getItem(CONTINUE_KEY)) localStorage.setItem(CONTINUE_KEY, "0");
+
+  function toastSafe(msg) { try { if (typeof toastMsg === "function") toastMsg(msg); } catch {} }
+
+  function closeModal() {
+    const m = document.getElementById("vipModal");
+    if (m) m.remove();
+  }
+
+  function openModal() {
+    closeModal();
+
+    const modal = document.createElement("div");
+    modal.id = "vipModal";
+    modal.style.position = "fixed";
+    modal.style.inset = "0";
+    modal.style.zIndex = "99999";
+    modal.style.display = "flex";
+    modal.style.alignItems = "center";
+    modal.style.justifyContent = "center";
+    modal.style.background = "rgba(0,0,0,0.55)";
+    modal.addEventListener("pointerdown", (e) => { if (e.target === modal) closeModal(); });
+
+    const card = document.createElement("div");
+    card.style.width = "min(520px, 92vw)";
+    card.style.borderRadius = "16px";
+    card.style.padding = "16px";
+    card.style.background = "#0f1734";
+    card.style.boxShadow = "0 10px 30px rgba(0,0,0,0.35)";
+    card.style.color = "#fff";
+    card.style.fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, Arial";
+
+    const title = document.createElement("div");
+    title.textContent = "VIP — Support Meek Rez";
+    title.style.fontSize = "18px";
+    title.style.fontWeight = "800";
+    title.style.marginBottom = "6px";
+
+    const sub = document.createElement("div");
+    sub.textContent = `Status: ${isVIP() ? "VIP ✅" : "Not VIP"} • Continues: ${getContinues()}`;
+    sub.style.opacity = "0.9";
+    sub.style.marginBottom = "12px";
+
+    const bullets = document.createElement("div");
+    bullets.style.opacity = "0.95";
+    bullets.style.marginBottom = "14px";
+    bullets.innerHTML =
+      "<div>• Unlock all visuals (maps/buildings/trails/etc.)</div>" +
+      "<div>• Get 5 continue lives</div>" +
+      "<div>• VIP can buy additional continue packs</div>" +
+      "<div style='margin-top:8px; opacity:0.85; font-size:12px;'>We don’t store your payment info. Payments are handled by the processor.</div>";
+
+    const row = document.createElement("div");
+    row.style.display = "flex";
+    row.style.gap = "10px";
+    row.style.flexWrap = "wrap";
+
+    function mkBtn(label) {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.style.border = "0";
+      b.style.borderRadius = "12px";
+      b.style.padding = "10px 12px";
+      b.style.cursor = "pointer";
+      b.style.fontWeight = "700";
+      b.style.background = "#1f4bff";
+      b.style.color = "#fff";
+      return b;
+    }
+
+    const buyVip = mkBtn("Buy VIP $4.99");
+    buyVip.addEventListener("click", () => {
+      // Placeholder until Stripe is wired
+      toastSafe("VIP payments coming next (Stripe).");
+      alert("VIP purchase is being set up next. For now this button is a placeholder.");
+    });
+
+    const restore = mkBtn("Restore VIP");
+    restore.style.background = "#2a325a";
+    restore.addEventListener("click", () => {
+      toastSafe("If you purchased VIP, restore will be available after Stripe login is added.");
+      alert("Restore will work after we add login + Stripe verification.");
+    });
+
+    const close = mkBtn("Close");
+    close.style.background = "#3a3f62";
+    close.addEventListener("click", closeModal);
+
+    row.appendChild(buyVip);
+    row.appendChild(restore);
+    row.appendChild(close);
+
+    // Admin tools (only visible if you set localStorage skybop_admin=true)
+    if (isAdmin()) {
+      const adminBox = document.createElement("div");
+      adminBox.style.marginTop = "14px";
+      adminBox.style.paddingTop = "10px";
+      adminBox.style.borderTop = "1px solid rgba(255,255,255,0.12)";
+      adminBox.style.opacity = "0.95";
+
+      const adminTitle = document.createElement("div");
+      adminTitle.textContent = "Admin Test Tools";
+      adminTitle.style.fontWeight = "800";
+      adminTitle.style.marginBottom = "8px";
+
+      const arow = document.createElement("div");
+      arow.style.display = "flex";
+      arow.style.gap = "10px";
+      arow.style.flexWrap = "wrap";
+
+      const grant = mkBtn("Grant VIP (test)");
+      grant.style.background = "#0ea5e9";
+      grant.addEventListener("click", () => {
+        localStorage.setItem(VIP_KEY, "true");
+        addContinues(5);
+        toastSafe("VIP granted (test) +5 continues");
+        closeModal();
+        openModal();
+      });
+
+      const add5 = mkBtn("Add 5 continues (test)");
+      add5.style.background = "#22c55e";
+      add5.addEventListener("click", () => {
+        addContinues(5);
+        toastSafe("+5 continues");
+        closeModal();
+        openModal();
+      });
+
+      const clear = mkBtn("Clear VIP (test)");
+      clear.style.background = "#ef4444";
+      clear.addEventListener("click", () => {
+        localStorage.removeItem(VIP_KEY);
+        setContinues(0);
+        toastSafe("VIP cleared (test)");
+        closeModal();
+        openModal();
+      });
+
+      arow.appendChild(grant);
+      arow.appendChild(add5);
+      arow.appendChild(clear);
+
+      adminBox.appendChild(adminTitle);
+      adminBox.appendChild(arow);
+      card.appendChild(adminBox);
+    }
+
+    card.appendChild(title);
+    card.appendChild(sub);
+    card.appendChild(bullets);
+    card.appendChild(row);
+
+    modal.appendChild(card);
+    document.body.appendChild(modal);
+  }
+
+  // Inject VIP button into Settings panel safely
+  function injectVipButton() {
+    const panel = document.getElementById("settingsPanel");
+    if (!panel) return;
+
+    if (document.getElementById("vipButton")) return;
+
+    const btn = document.createElement("button");
+    btn.id = "vipButton";
+    btn.className = "btn"; // uses your existing button styling if present
+    btn.textContent = "VIP";
+    btn.style.marginTop = "10px";
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      openModal();
+    });
+
+    // Add near top of settings panel so it’s visible
+    panel.appendChild(btn);
+  }
+
+  // Try now + after a short delay (in case UI builds later)
+  injectVipButton();
+  setTimeout(injectVipButton, 400);
+})();
